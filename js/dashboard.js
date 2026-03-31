@@ -7,6 +7,8 @@
  * Reuniones: GET /api/metrics/reuniones (paginado)
  */
 (() => {
+  document.body.classList.add('app-ready');
+
   let currentSection = 'overview';
   let dashboardData = null;
   let reunionesPage = 0;
@@ -30,6 +32,21 @@
   }
 
   function setLoading(on) { loading.classList.toggle('hidden', !on); }
+
+  /** Re-dispara animaciones CSS al mostrar datos de una sección */
+  function triggerSectionAnimations(section) {
+    $$('.section').forEach((s) => s.classList.remove('section-enter'));
+    const el = document.getElementById(`section-${section}`);
+    if (!el || el.classList.contains('hidden')) return;
+    void el.offsetWidth;
+    el.classList.add('section-enter');
+    const pt = $('#pageTitle');
+    if (pt) {
+      pt.classList.remove('title-anim');
+      void pt.offsetWidth;
+      pt.classList.add('title-anim');
+    }
+  }
 
   function setConnection(state, extra) {
     connStatus.className = `connection-status ${state}`;
@@ -304,6 +321,7 @@
       setConnection('error');
     } finally {
       setLoading(false);
+      requestAnimationFrame(() => triggerSectionAnimations(currentSection));
     }
   }
 
@@ -451,38 +469,114 @@
     return { seguimientos, cliente, pctVal, media };
   }
 
+  /** Une resumen/summary/dashboard.metrics y alias camelCase / snake_case para que los gráficos no queden en 0 */
+  function mergeResumenSources(data) {
+    if (!data || typeof data !== 'object') return {};
+    const out = {};
+    const blocks = [data.resumen, data.summary, data.totales, data.metrics].filter(
+      (x) => x && typeof x === 'object' && !Array.isArray(x)
+    );
+    if (data.dashboard && typeof data.dashboard === 'object' && !Array.isArray(data.dashboard)) {
+      blocks.push(data.dashboard);
+    }
+    for (const b of blocks) Object.assign(out, b);
+    return out;
+  }
+
+  function normalizeResumen(data) {
+    const m = mergeResumenSources(data);
+    const pick = (...keys) => {
+      for (const k of keys) {
+        const v = m[k] ?? (data && data[k]);
+        if (v !== undefined && v !== null) return v;
+      }
+      return undefined;
+    };
+    const n = (v, d = 0) => {
+      const x = Number(v);
+      return Number.isFinite(x) ? x : d;
+    };
+
+    let reuniones_con_retro = n(pick('reuniones_con_retro', 'reunionesConRetro', 'con_retro'));
+    let reuniones_sin_retro = n(pick('reuniones_sin_retro', 'reunionesSinRetro', 'sin_retro'));
+    let reuniones_total = n(pick('reuniones_total', 'reunionesTotal', 'total_reuniones', 'totalReuniones'));
+    if (!reuniones_total && (reuniones_con_retro || reuniones_sin_retro)) {
+      reuniones_total = reuniones_con_retro + reuniones_sin_retro;
+    }
+
+    return {
+      total_auditorias: n(pick('total_auditorias', 'totalAuditorias', 'auditorias')),
+      leads_aceptados: n(pick('leads_aceptados', 'leadsAceptados', 'aceptados', 'leads_accepted')),
+      leads_pendientes: n(pick('leads_pendientes', 'leadsPendientes', 'pendientes')),
+      leads_rechazados: n(pick('leads_rechazados', 'leadsRechazados', 'rechazados')),
+      reuniones_total,
+      reuniones_con_retro,
+      reuniones_sin_retro,
+      promedio_minutos_retro: pick('promedio_minutos_retro', 'promedioMinutosRetro', 'promedio_min_retro'),
+      propuestas_registradas: n(
+        pick('propuestas_registradas', 'propuestasRegistradas', 'propuestas', 'total_propuestas')
+      ),
+      ventas_cerradas: n(pick('ventas_cerradas', 'ventasCerradas', 'cerradas')),
+      ventas_perdidas: n(pick('ventas_perdidas', 'ventasPerdidas', 'perdidas')),
+      ventas_en_seguimiento: n(
+        pick(
+          'ventas_en_seguimiento',
+          'ventasEnSeguimiento',
+          'seguimientos_registrados',
+          'seguimientosRegistrados',
+          'en_seguimiento'
+        )
+      ),
+      media_notiREU: pick('media_notiREU', 'mediaNotiREU', 'notiREU_promedio', 'notireu_promedio')
+    };
+  }
+
   // ═══════════════════════════════════════════════
   //  OVERVIEW  (data.resumen)
   // ═══════════════════════════════════════════════
   function renderOverview(data) {
-    const r = data.resumen || {};
+    const r = normalizeResumen(data);
 
-    $('#kpi-auditorias').textContent     = fmt(r.total_auditorias);
-    $('#kpi-aceptados').textContent      = fmt(r.leads_aceptados);
-    $('#kpi-pendientes').textContent     = fmt(r.leads_pendientes);
-    $('#kpi-rechazados').textContent     = fmt(r.leads_rechazados);
-    $('#kpi-reuniones').textContent      = fmt(r.reuniones_total ?? ((r.reuniones_con_retro || 0) + (r.reuniones_sin_retro || 0)));
-    $('#kpi-tiempoRetro').textContent    = fmt(r.promedio_minutos_retro, 1);
-    $('#kpi-propuestas').textContent     = fmt(r.propuestas_registradas ?? r.propuestas);
+    $('#kpi-auditorias').textContent = fmt(r.total_auditorias);
+    $('#kpi-aceptados').textContent = fmt(r.leads_aceptados);
+    $('#kpi-pendientes').textContent = fmt(r.leads_pendientes);
+    $('#kpi-rechazados').textContent = fmt(r.leads_rechazados);
+    $('#kpi-reuniones').textContent = fmt(
+      r.reuniones_total || (r.reuniones_con_retro || 0) + (r.reuniones_sin_retro || 0)
+    );
+    $('#kpi-tiempoRetro').textContent = fmt(r.promedio_minutos_retro, 1);
+    $('#kpi-propuestas').textContent = fmt(r.propuestas_registradas);
     $('#kpi-ventasCerradas').textContent = fmt(r.ventas_cerradas);
 
-    Charts.doughnut('chartLeads',
-      ['Aceptados', 'Rechazados', 'Pendientes'],
-      [r.leads_aceptados || 0, r.leads_rechazados || 0, r.leads_pendientes || 0]
-    );
+    Charts.doughnut('chartLeads', ['Aceptados', 'Rechazados', 'Pendientes'], [
+      r.leads_aceptados,
+      r.leads_rechazados,
+      r.leads_pendientes
+    ]);
 
-    Charts.doughnut('chartVentas',
-      ['Cerradas', 'Perdidas', 'En Seguimiento'],
-      [r.ventas_cerradas || 0, r.ventas_perdidas || 0, r.ventas_en_seguimiento || r.seguimientos_registrados || 0]
-    );
+    Charts.doughnut('chartVentas', ['Cerradas', 'Perdidas', 'En Seguimiento'], [
+      r.ventas_cerradas,
+      r.ventas_perdidas,
+      r.ventas_en_seguimiento
+    ]);
 
-    const notiVal = r.media_notiREU ?? r.notiREU_promedio ?? r.notireu_promedio;
+    const notiVal = r.media_notiREU;
     $('#gaugeNotiValue').textContent = notiVal != null ? Number(notiVal).toFixed(1) : '—';
 
-    Charts.barVertical('chartRetro',
-      ['Con Retro', 'Sin Retro'],
-      [{ data: [r.reuniones_con_retro || 0, r.reuniones_sin_retro || 0], backgroundColor: ['#145478', '#c8151b'], borderRadius: 3, barThickness: 48 }]
-    );
+    Charts.barVertical('chartRetro', ['Con Retro', 'Sin Retro'], [
+      {
+        data: [r.reuniones_con_retro, r.reuniones_sin_retro],
+        backgroundColor: ['#145478', '#c8151b'],
+        borderRadius: 3
+      }
+    ]);
+
+    requestAnimationFrame(() => {
+      ['chartLeads', 'chartVentas', 'chartRetro'].forEach((id) => {
+        const ch = Charts.instances[id];
+        if (ch?.resize) ch.resize();
+      });
+    });
   }
 
   // ═══════════════════════════════════════════════
@@ -503,7 +597,7 @@
       .slice(0, 20);
     Charts.barVertical('chartAsesoresBar',
       sorted.map((a) => a.nombre || a.advisor_name || '(sin asesor)'),
-      [{ label: metric.replace(/_/g, ' '), data: sorted.map((a) => a[metric] || 0), backgroundColor: '#145478', borderRadius: 3, barThickness: 22 }]
+      [{ label: metric.replace(/_/g, ' '), data: sorted.map((a) => a[metric] || 0), backgroundColor: '#145478', borderRadius: 3 }]
     );
   }
 
@@ -557,8 +651,7 @@
         label: 'Tasa de cierre %',
         data: rubroList.map((r) => r.tasa),
         backgroundColor: '#c8151b',
-        borderRadius: 3,
-        barThickness: 28
+        borderRadius: 3
       }]);
     } else {
       Charts.mixedBar('chartPropuestasRubro', ['Sin datos'], [
@@ -568,8 +661,7 @@
         label: 'Tasa %',
         data: [0],
         backgroundColor: '#989797',
-        borderRadius: 3,
-        barThickness: 28
+        borderRadius: 3
       }]);
     }
 
@@ -721,6 +813,7 @@
       setConnection('error');
     } finally {
       setLoading(false);
+      requestAnimationFrame(() => triggerSectionAnimations('overview'));
     }
   }
 

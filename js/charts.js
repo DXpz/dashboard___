@@ -21,16 +21,27 @@ const Charts = (() => {
     }
   }
 
+  /** Barras visibles con 1 sola categoría o valores pequeños */
+  function barSizingOptions(labelCount) {
+    const n = Math.max(1, labelCount || 1);
+    return {
+      categoryPercentage: n <= 1 ? 0.92 : n <= 3 ? 0.88 : 0.82,
+      barPercentage: n <= 1 ? 0.92 : 0.8,
+      maxBarThickness: n <= 1 ? 120 : 88
+    };
+  }
+
   function doughnut(canvasId, labels, data, title) {
     destroy(canvasId);
     const ctx = document.getElementById(canvasId);
     if (!ctx) return;
+    const nums = (data || []).map((v) => Number(v) || 0);
     instances[canvasId] = new Chart(ctx, {
       type: 'doughnut',
       data: {
         labels,
         datasets: [{
-          data,
+          data: nums,
           backgroundColor: PALETTE.slice(0, labels.length),
           borderWidth: 0,
           hoverOffset: 8
@@ -39,7 +50,8 @@ const Charts = (() => {
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        cutout: '65%',
+        cutout: '58%',
+        layout: { padding: 6 },
         plugins: {
           legend: { position: 'bottom', labels: { padding: 16, usePointStyle: true, pointStyleWidth: 10 } },
           tooltip: {
@@ -48,7 +60,15 @@ const Charts = (() => {
             borderWidth: 1,
             titleFont: { weight: '600' },
             padding: 10,
-            cornerRadius: 8
+            cornerRadius: 8,
+            callbacks: {
+              label: (ctx) => {
+                const i = ctx.dataIndex;
+                const raw = nums[i];
+                const label = ctx.label || '';
+                return `${label}: ${Number(raw).toLocaleString('es-ES')}`;
+              }
+            }
           }
         }
       }
@@ -60,12 +80,16 @@ const Charts = (() => {
     destroy(canvasId);
     const ctx = document.getElementById(canvasId);
     if (!ctx) return;
+    const lc = Array.isArray(labels) ? labels.length : 0;
     instances[canvasId] = new Chart(ctx, {
       type: 'bar',
       data: { labels, datasets },
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        datasets: {
+          bar: barSizingOptions(lc)
+        },
         plugins: {
           legend: {
             display: datasets.length > 1,
@@ -89,6 +113,7 @@ const Charts = (() => {
           y: {
             stacked,
             beginAtZero: true,
+            grace: '12%',
             grid: { color: 'rgba(42,45,62,.4)' }
           }
         }
@@ -101,6 +126,7 @@ const Charts = (() => {
     destroy(canvasId);
     const ctx = document.getElementById(canvasId);
     if (!ctx) return;
+    const lc = Array.isArray(labels) ? labels.length : 0;
     instances[canvasId] = new Chart(ctx, {
       type: 'bar',
       data: {
@@ -108,14 +134,16 @@ const Charts = (() => {
         datasets: [{
           data,
           backgroundColor: color || PALETTE[0],
-          borderRadius: 4,
-          barThickness: 18
+          borderRadius: 4
         }]
       },
       options: {
         indexAxis: 'y',
         responsive: true,
         maintainAspectRatio: false,
+        datasets: {
+          bar: barSizingOptions(lc)
+        },
         plugins: {
           legend: { display: false },
           tooltip: {
@@ -127,7 +155,7 @@ const Charts = (() => {
           }
         },
         scales: {
-          x: { beginAtZero: true, grid: { color: 'rgba(42,45,62,.4)' } },
+          x: { beginAtZero: true, grace: '12%', grid: { color: 'rgba(42,45,62,.4)' } },
           y: { grid: { display: false }, ticks: { font: { size: 11 } } }
         }
       }
@@ -139,15 +167,17 @@ const Charts = (() => {
     destroy(canvasId);
     const ctx = document.getElementById(canvasId);
     if (!ctx) return;
+    const lc = Array.isArray(labels) ? labels.length : 0;
     const scales = {
       x: { grid: { display: false }, ticks: { maxRotation: 45, font: { size: 11 } } },
-      y: { beginAtZero: true, grid: { color: 'rgba(42,45,62,.4)' } }
+      y: { beginAtZero: true, grace: '12%', grid: { color: 'rgba(42,45,62,.4)' } }
     };
     if (dualAxis) {
       scales.y1 = {
         type: 'linear',
         position: 'right',
         beginAtZero: true,
+        grace: '12%',
         grid: { drawOnChartArea: false }
       };
     }
@@ -157,6 +187,9 @@ const Charts = (() => {
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        datasets: {
+          bar: barSizingOptions(lc)
+        },
         plugins: {
           legend: { position: 'top', labels: { usePointStyle: true, pointStyleWidth: 10, padding: 14 } },
           tooltip: {
