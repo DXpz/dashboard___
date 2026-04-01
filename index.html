@@ -7,14 +7,15 @@
   <title>Dashboard — Métricas de Asesores de Ventas</title>
   <link rel="icon" type="image/png" href="logo.png">
   <link rel="apple-touch-icon" href="logo.png">
-  <link rel="stylesheet" href="css/styles.css?v=20260331d">
+  <link rel="stylesheet" href="css/styles.css?v=20260430d">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
-  <!-- Sidebar -->
+  <!-- Sidebar: en escritorio se despliega al pasar el ratón por el borde izquierdo -->
+  <div class="sidebar-dock" aria-label="Menú lateral">
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-header">
       <div class="logo">
@@ -24,26 +25,35 @@
     <nav class="sidebar-nav">
       <a href="#" class="nav-item active" data-section="overview">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-        Resumen General
+        <span class="nav-item-label">Resumen General</span>
       </a>
       <a href="#" class="nav-item" data-section="asesores">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-        Asesores
+        <span class="nav-item-label">Asesores</span>
       </a>
       <a href="#" class="nav-item" data-section="propuestas">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-        Propuestas
+        <span class="nav-item-label">Propuestas</span>
       </a>
       <a href="#" class="nav-item" data-section="negociacion">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-        Negociación
+        <span class="nav-item-label">Negociación</span>
       </a>
       <a href="#" class="nav-item" data-section="reuniones">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-        Reuniones
+        <span class="nav-item-label">Reuniones</span>
+      </a>
+      <a href="#" class="nav-item" data-section="origen-leads">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+        <span class="nav-item-label">Origen leads</span>
+      </a>
+      <a href="#" class="nav-item" data-section="gestion-asesores">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+        <span class="nav-item-label">Gestión asesores</span>
       </a>
     </nav>
   </aside>
+  </div>
 
   <!-- Main Content -->
   <main class="main-content">
@@ -277,12 +287,22 @@
           </div>
         </div>
 
-        <div class="chart-card full-width">
-          <div class="chart-header">
-            <h3>Motivos de Pérdida</h3>
+        <div class="charts-row two-cols">
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3>Motivos de pérdida (detalle)</h3>
+            </div>
+            <div class="chart-body chart-body-tall">
+              <canvas id="chartMotivos"></canvas>
+            </div>
           </div>
-          <div class="chart-body chart-body-tall">
-            <canvas id="chartMotivos"></canvas>
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3>Motivos por categoría</h3>
+            </div>
+            <div class="chart-body chart-body-tall">
+              <canvas id="chartMotivosCat"></canvas>
+            </div>
           </div>
         </div>
       </section>
@@ -364,6 +384,7 @@
                   <th>Estado Reunión</th>
                   <th>Noti REU</th>
                   <th>Min a Retro</th>
+                  <th>Propuesta</th>
                 </tr>
               </thead>
               <tbody id="tbodyReuniones"></tbody>
@@ -372,17 +393,150 @@
         </div>
       </section>
 
+      <!-- ==================== SECTION: ORIGEN DE LEADS ==================== -->
+      <section class="section hidden" id="section-origen-leads">
+        <div class="origen-toolbar chart-card full-width">
+          <p class="origen-toolbar-label">Agrupar evolución por</p>
+          <div class="origen-segment" role="group" aria-label="Agrupación temporal">
+            <button type="button" class="origen-segment-btn" data-origen-agrup="day">Día</button>
+            <button type="button" class="origen-segment-btn active" data-origen-agrup="week">Semana</button>
+            <button type="button" class="origen-segment-btn" data-origen-agrup="month">Mes</button>
+          </div>
+          <p class="origen-leads-hint" id="origenLeadsHint"></p>
+        </div>
+
+        <div class="kpi-grid kpi-grid-origen">
+          <div class="kpi-card">
+            <div class="kpi-icon blue">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            </div>
+            <div class="kpi-info">
+              <span class="kpi-value" id="kpi-origen-total">—</span>
+              <span class="kpi-label">Leads totales</span>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon green">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20v-6M6 20V10M18 20V4"/></svg>
+            </div>
+            <div class="kpi-info">
+              <span class="kpi-value" id="kpi-origen-top">—</span>
+              <span class="kpi-label">Canal con más leads</span>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon purple">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/></svg>
+            </div>
+            <div class="kpi-info">
+              <span class="kpi-value" id="kpi-origen-muestra">—</span>
+              <span class="kpi-label">Registros analizados</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="charts-row two-cols origen-charts-row">
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3>Distribución por canal</h3>
+            </div>
+            <div class="chart-body chart-body-origen-donut">
+              <canvas id="chartOrigenDonut"></canvas>
+            </div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3>Leads por canal en el tiempo</h3>
+            </div>
+            <div class="chart-body chart-body-origen-bar">
+              <canvas id="chartOrigenTiempo"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <div class="chart-card full-width">
+          <div class="chart-header">
+            <h3>Detalle por canal</h3>
+          </div>
+          <div class="table-wrapper">
+            <table class="data-table" id="tablaOrigenLeads">
+              <thead>
+                <tr>
+                  <th>Canal</th>
+                  <th>Leads</th>
+                  <th>% del total</th>
+                </tr>
+              </thead>
+              <tbody id="tbodyOrigenLeads"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== SECTION: GESTIÓN ASESORES (activar / desactivar / eliminar) ==================== -->
+      <section class="section hidden" id="section-gestion-asesores">
+        <div class="gestion-intro chart-card full-width">
+          <p class="gestion-intro-text">
+            <strong>Activo</strong>: el asesor puede recibir nuevas reuniones.
+            <strong>Desactivado</strong>: no disponible (vacaciones, baja médica, etc.).
+            <strong>Eliminar</strong>: cuando deja la empresa; se pide confirmación en dos pasos (escribir <code>ELIMINAR</code>).
+          </p>
+          <p class="gestion-intro-hint" id="gestionSourceHint"></p>
+        </div>
+        <div class="chart-card full-width">
+          <div class="chart-header">
+            <h3>Asesores</h3>
+            <div class="chart-actions">
+              <button type="button" class="btn btn-sm btn-ghost" id="btnGestionRefresh" title="Recargar lista">Actualizar</button>
+            </div>
+          </div>
+          <div class="gestion-asesores-grid" id="gestionAsesoresList"></div>
+        </div>
+      </section>
+
+      <div class="loading-overlay" id="loadingOverlay">
+        <div class="spinner"></div>
+        <p>Cargando datos...</p>
+      </div>
     </div>
 
-    <!-- Loading overlay -->
-    <div class="loading-overlay" id="loadingOverlay">
-      <div class="spinner"></div>
-      <p>Cargando datos...</p>
+    <div class="modal-overlay hidden" id="modalPropuestaHistory" role="dialog" aria-modal="true" aria-labelledby="modalPropHistTitle">
+      <div class="modal-panel">
+        <div class="modal-head">
+          <h3 id="modalPropHistTitle">Historial de propuestas</h3>
+          <button type="button" class="btn btn-sm btn-ghost" id="btnClosePropHist" aria-label="Cerrar">&times;</button>
+        </div>
+        <div class="modal-body-scroll" id="modalPropHistBody"></div>
+      </div>
     </div>
+
+    <!-- Eliminar asesor: confirmación doble (escribir ELIMINAR) -->
+    <div class="modal-overlay hidden" id="modalDeleteAsesor" role="dialog" aria-modal="true" aria-labelledby="modalDeleteAsesorTitle">
+      <div class="modal-panel modal-panel--narrow">
+        <div class="modal-head">
+          <h3 id="modalDeleteAsesorTitle">Eliminar perfil</h3>
+          <button type="button" class="btn btn-sm btn-ghost" id="btnCloseDeleteAsesor" aria-label="Cerrar">&times;</button>
+        </div>
+        <div class="modal-body-scroll modal-body--delete-asesor">
+          <p class="modal-delete-lead">
+            Va a eliminar el perfil de <strong id="deleteAsesorNombre"></strong>. Esta acción está pensada cuando la persona ya no forma parte del equipo.
+          </p>
+          <p class="modal-delete-step2">Segundo paso: escriba <strong>ELIMINAR</strong> para confirmar.</p>
+          <label class="modal-delete-label" for="deleteAsesorConfirmInput">Confirmación</label>
+          <input type="text" id="deleteAsesorConfirmInput" class="input-modal-delete" autocomplete="off" placeholder="Escriba ELIMINAR" />
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" id="btnDeleteAsesorCancel">Cancelar</button>
+            <button type="button" class="btn btn-danger-solid" id="btnDeleteAsesorConfirm" disabled>Eliminar definitivamente</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="toast" id="appToast" role="status" aria-live="polite" hidden></div>
   </main>
 
-  <script src="js/api.js"></script>
-  <script src="js/charts.js"></script>
-  <script src="js/dashboard.js"></script>
+  <script src="js/api.js?v=20260401c"></script>
+  <script src="js/charts.js?v=20260402c"></script>
+  <script src="js/dashboard.js?v=20260401b"></script>
 </body>
 </html>
