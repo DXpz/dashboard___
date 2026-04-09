@@ -112,9 +112,25 @@
   function setConnection(state, extra) {
     connStatus.className = `connection-status ${state}`;
     const txt = connStatus.querySelector('.status-text');
-    if (state === 'connected') txt.textContent = extra ? `Conectado · v${extra}` : 'Conectado';
-    else if (state === 'error') txt.textContent = 'Sin conexión';
-    else txt.textContent = 'Conectando...';
+    const hint = $('#connectionHint');
+    if (hint) {
+      hint.classList.add('hidden');
+      hint.textContent = '';
+    }
+    connStatus.removeAttribute('title');
+    if (state === 'connected') {
+      txt.textContent = extra ? `Conectado · v${extra}` : 'Conectado';
+    } else if (state === 'error') {
+      txt.textContent = typeof extra === 'string' && extra ? extra : 'Sin conexión';
+      const base = API.getBase && API.getBase();
+      if (hint && base) {
+        hint.classList.remove('hidden');
+        hint.textContent = `No responde ${base} (timeout). La API es ajena a este equipo: confirme con quien la opera la URL/puerto vigentes, si hace falta VPN o IP permitida, y que el servicio esté arriba. Si le pasan otra base, F12 → consola → API.setBase('https://…') y recargue.`;
+        connStatus.title = `Última base intentada: ${base}`;
+      }
+    } else {
+      txt.textContent = 'Conectando...';
+    }
   }
 
   /** ISO datetime: el input date solo da YYYY-MM-DD; el API filtra por datetime */
@@ -125,6 +141,14 @@
       desde: d ? (d.includes('T') ? d : `${d}T00:00:00`) : undefined,
       hasta: h ? (h.includes('T') ? h : `${h}T23:59:59.999`) : undefined
     };
+  }
+
+  function getAgentNombre() {
+    return ($('#filterAsesor')?.value ?? '').trim() || undefined;
+  }
+
+  function updateAgentFilterVisibility() {
+    $('#filterAsesorWrap')?.classList.toggle('hidden', currentSection === 'origen-leads');
   }
 
   const num = (v) => {
@@ -164,9 +188,16 @@
     return `n:${normName(row.nombre)}`;
   }
 
+  function pickAdvisorDisplayName(x) {
+    if (!x || typeof x !== 'object') return '';
+    return String(
+      x.nombre_vendedor ?? x.advisor_name ?? x.nombre ?? x.name ?? x.vendedor ?? x.label ?? ''
+    ).trim();
+  }
+
   function mapListaAsesorRow(x) {
     if (!x || typeof x !== 'object') return null;
-    const nombre = String(x.advisor_name ?? x.nombre ?? x.name ?? '').trim();
+    const nombre = pickAdvisorDisplayName(x);
     if (!nombre || normName(nombre) === '(sin asesor)') return null;
     return {
       nombre,
@@ -177,9 +208,80 @@
   function normalizeListaAsesores(raw) {
     if (Array.isArray(raw)) return raw.map(mapListaAsesorRow).filter(Boolean);
     if (!raw || typeof raw !== 'object') return [];
-    const inner = raw.items ?? raw.asesores ?? raw.data ?? raw.lista ?? raw.rows ?? raw.result;
+    const inner =
+      raw.items ??
+      raw.asesores ??
+      raw.data ??
+      raw.lista ??
+      raw.rows ??
+      raw.result ??
+      raw.lista_asesores ??
+      raw.listaAsesores ??
+      raw.advisors;
     if (Array.isArray(inner)) return inner.map(mapListaAsesorRow).filter(Boolean);
     return [];
+  }
+
+  function namesFromDashboardBundle(data) {
+    if (!data || typeof data !== 'object') return [];
+    const rows = normalizeAsesoresRows(data.asesores);
+    const out = [];
+    for (const r of rows) {
+      const n = pickAdvisorDisplayName(r);
+      if (n) out.push(n);
+    }
+    return out;
+  }
+
+  /** Rellena el desplegable de asesores combinando catálogo, lista por fechas y bundle del dashboard. */
+  async function refreshAgentFilterOptions(preserveSelection = true) {
+    const sel = $('#filterAsesor');
+    if (!sel) return;
+    const prev = preserveSelection ? sel.value : '';
+    const f = getFilters();
+    const nameSet = new Set();
+
+    const add = (arr) => {
+      for (const v of arr) {
+        const s = String(v ?? '').trim();
+        if (!s || normName(s) === '(sin asesor)') continue;
+        nameSet.add(s);
+      }
+    };
+
+    /* 1) Catálogo de asesores: suele traer todos los nombres aunque lista-asesores venga distinto o vacío */
+    try {
+      const raw = await API.advisorsList({});
+      const items = Array.isArray(raw) ? raw : (raw.advisors ?? raw.items ?? raw.data ?? []);
+      if (Array.isArray(items)) add(items.map((x) => pickAdvisorDisplayName(x)));
+    } catch (e) {
+      console.warn('[filterAsesor] /api/advisors:', e?.message || e);
+    }
+
+    /* 2) lista-asesores en el rango de fechas (si hay fechas; si no, igual se pide sin params) */
+    try {
+      const raw = await API.listaAsesores(f.desde, f.hasta);
+      add(normalizeListaAsesores(raw).map((x) => x.nombre));
+    } catch (e) {
+      console.warn('[filterAsesor] lista-asesores:', e?.message || e);
+    }
+
+    /* 3) Nombres del dashboard ya en memoria (p. ej. tras ensureDashboardData) */
+    if (dashboardData) add(namesFromDashboardBundle(dashboardData));
+
+    const unique = [...nameSet].sort((a, b) => a.localeCompare(b, 'es'));
+    sel.innerHTML = '';
+    const opt0 = document.createElement('option');
+    opt0.value = '';
+    opt0.textContent = 'Todos los asesores';
+    sel.appendChild(opt0);
+    for (const n of unique) {
+      const o = document.createElement('option');
+      o.value = n;
+      o.textContent = n;
+      sel.appendChild(o);
+    }
+    if (prev && unique.includes(prev)) sel.value = prev;
   }
 
   function showToast(message, isError) {
@@ -445,6 +547,7 @@
 
   function switchSection(section) {
     currentSection = section;
+    updateAgentFilterVisibility();
     $$('.nav-item').forEach((n) => n.classList.toggle('active', n.dataset.section === section));
     $$('.section').forEach((s) => s.classList.toggle('hidden', s.id !== `section-${section}`));
     const titles = {
@@ -459,26 +562,41 @@
     $('#pageTitle').textContent = titles[section] || section;
     triggerTitleUnderline();
     loadSectionData(section);
-    if (window.innerWidth <= 900) $('#sidebar').classList.remove('open');
+    $('#sidebar')?.classList.remove('open');
+    $('#sidebarDock')?.classList.remove('open');
   }
 
-  $('#menuToggle').addEventListener('click', () => $('#sidebar').classList.toggle('open'));
+  $('#menuToggle').addEventListener('click', () => {
+    $('#sidebar')?.classList.toggle('open');
+    $('#sidebarDock')?.classList.toggle('open');
+  });
 
   $('#btnFiltrar').addEventListener('click', () => {
     API.invalidateCache();
     dashboardData = null;
-    loadSectionData(currentSection);
+    refreshAgentFilterOptions(true)
+      .catch(() => {})
+      .finally(() => loadSectionData(currentSection));
   });
 
   $('#btnLimpiar').addEventListener('click', () => {
     $('#desde').value = '';
     $('#hasta').value = '';
+    const fs = $('#filterAsesor');
+    if (fs) fs.value = '';
     API.invalidateCache();
     dashboardData = null;
+    refreshAgentFilterOptions(false)
+      .catch(() => {})
+      .finally(() => loadSectionData(currentSection));
+  });
+
+  $('#filterAsesor')?.addEventListener('change', () => {
     loadSectionData(currentSection);
   });
 
   // ─── Fetch dashboard bundle ───
+  /** Siempre agregado global (sin filtro por nombre en URL) para poder rebanar por asesor en cliente. */
   async function ensureDashboardData() {
     if (dashboardData) return dashboardData;
     const f = getFilters();
@@ -675,7 +793,6 @@
     });
     const f = getFilters();
     const agrup = origenAgrupacion;
-    const hintEl = $('#origenLeadsHint');
 
     let apiParsed = null;
     try {
@@ -689,7 +806,6 @@
     const built = buildOrigenFromRows(rows, agrup, f.hasta);
 
     let model;
-    let hint;
 
     const apiOk = apiParsed && (apiParsed.total > 0 || sumPorOrigen(apiParsed.porOrigen) > 0);
 
@@ -701,15 +817,10 @@
         stackedBySource: built.stackedBySource,
         rowsAnalyzed: built.rowsAnalyzed
       };
-      hint =
-        'Los totales por canal vienen del registro de fuentes en el sistema. La gráfica en el tiempo usa el mismo rango de fechas de arriba y la agrupación elegida (día, semana o mes).';
     } else {
       model = built;
-      hint =
-        'Aquí se muestran las reuniones del rango elegido, agrupadas por canal cuando el origen está guardado. Si no ve datos, amplíe las fechas o compruebe la conexión.';
     }
 
-    if (hintEl) hintEl.textContent = hint;
     renderOrigenLeads(model);
   }
 
@@ -774,14 +885,14 @@
 
   // ─── Gestión de perfiles (servidor o catálogo por fechas + localStorage) ───
   async function loadGestionAsesores() {
-    const hint = $('#gestionSourceHint');
     const state = loadGestionState();
     const elimSet = new Set(state.eliminados.map((x) => normName(x)));
 
     let rows = [];
 
     try {
-      const g = await API.advisorsList();
+      const paisF = ($('#gestionFilterPais')?.value ?? '').trim();
+      const g = await API.advisorsList(paisF ? { pais: paisF } : {});
       const items = Array.isArray(g) ? g : (g.advisors ?? g.items ?? g.data ?? []);
       if (Array.isArray(items) && items.length) {
         rows = items
@@ -814,10 +925,17 @@
               _fromServer: true
             };
           })
-          .filter(Boolean);
+            .filter(Boolean);
       }
     } catch (e) {
       console.warn('Lista de asesores:', e.message || e);
+    }
+
+    const agFilter = getAgentNombre();
+    if (agFilter && rows.length) {
+      rows = rows.filter(
+        (r) => normName(r.nombre) === normName(agFilter) || String(r.nombre).trim() === agFilter
+      );
     }
 
     if (!rows.length) {
@@ -843,13 +961,6 @@
             _fromServer: false
           };
         });
-      if (hint) {
-        hint.textContent =
-          'Lista tomada del catálogo de asesores según el rango de fechas. Si no hay enlace con la base de asesores, los cambios se guardan solo en este navegador.';
-      }
-    } else if (hint) {
-      hint.textContent =
-        'Lista de asesores del servidor. Al cambiar disponibilidad se guarda al instante; si falla la conexión, queda una copia local en este equipo.';
     }
 
     gestionRows = rows;
@@ -861,7 +972,7 @@
     if (!root) return;
     if (!gestionRows.length) {
       root.innerHTML =
-        '<div class="gestion-empty">No hay asesores en el catálogo para este rango. Ajuste las fechas o pulse Actualizar.</div>';
+        '<div class="gestion-empty">Sin asesores en este rango.</div>';
       return;
     }
     root.innerHTML = gestionRows
@@ -941,6 +1052,85 @@
     $('#modalDeleteAsesor')?.classList.add('hidden');
   }
 
+  function openNuevoAsesorModal() {
+    const form = $('#formNuevoAsesor');
+    form?.reset();
+    const si = document.querySelector('#formNuevoAsesor input[name="nuevoAsesorActivo"][value="true"]');
+    if (si) si.checked = true;
+    const saveBtn = $('#btnNuevoAsesorGuardar');
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Crear asesor';
+    }
+    $('#modalNuevoAsesor')?.classList.remove('hidden');
+    $('#nuevoAsesorNombre')?.focus();
+  }
+
+  function closeNuevoAsesorModal() {
+    $('#modalNuevoAsesor')?.classList.add('hidden');
+    const saveBtn = $('#btnNuevoAsesorGuardar');
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Crear asesor';
+    }
+  }
+
+  async function submitNuevoAsesor(e) {
+    e.preventDefault();
+    const nombreEl = $('#nuevoAsesorNombre');
+    const correoEl = $('#nuevoAsesorCorreo');
+    const paisEl = $('#nuevoAsesorPais');
+    const nombre = (nombreEl?.value ?? '').trim();
+    const correo = (correoEl?.value ?? '').trim();
+    const pais = (paisEl?.value ?? '').trim();
+    if (!nombre) {
+      showToast('Indique el nombre del asesor.', true);
+      nombreEl?.focus();
+      return;
+    }
+    if (!correo) {
+      showToast('Indique el correo del asesor.', true);
+      correoEl?.focus();
+      return;
+    }
+    if (!pais) {
+      showToast('Indique el país.', true);
+      paisEl?.focus();
+      return;
+    }
+    const activoRadio = document.querySelector('input[name="nuevoAsesorActivo"]:checked');
+    const activo = activoRadio?.value === 'true';
+    const body = {
+      nombre_vendedor: nombre,
+      correo_vendedor: correo,
+      pais,
+      activo
+    };
+
+    const saveBtn = $('#btnNuevoAsesorGuardar');
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Guardando…';
+    }
+    try {
+      await API.advisorsCreate(body);
+      API.invalidateCache();
+      showToast('Asesor creado.');
+      closeNuevoAsesorModal();
+      await loadGestionAsesores();
+    } catch (err) {
+      console.warn('Crear asesor:', err.message || err);
+      const msg = err?.message ? String(err.message) : 'No se pudo crear el asesor.';
+      showToast(msg, true);
+    } finally {
+      const b = $('#btnNuevoAsesorGuardar');
+      if (b && !$('#modalNuevoAsesor')?.classList.contains('hidden')) {
+        b.disabled = false;
+        b.textContent = 'Crear asesor';
+      }
+    }
+  }
+
   async function confirmDeleteAsesor() {
     const row = gestionDeletePending;
     if (!row) return;
@@ -1007,16 +1197,47 @@
         if (section === 'asesores') {
           try {
             const f = getFilters();
-            const raw = await API.asesores(f.desde, f.hasta, DASHBOARD_QUERY.group_by_asesores);
-            const list = normalizeAsesoresRows(raw);
+            const ag = getAgentNombre();
+            let list = [];
+            if (ag) {
+              try {
+                const raw = await API.asesor(ag, f.desde, f.hasta);
+                list = normalizeAsesoresRows(raw);
+              } catch (_) {}
+              if (!list.length) {
+                const one = findMatchingAsesorRow(normalizeAsesoresRows(data.asesores), ag);
+                if (one) list = [one];
+              } else if (list.length > 1) {
+                list = list.filter(
+                  (row) =>
+                    normName(row.nombre ?? row.advisor_name ?? '') === normName(ag) ||
+                    String(row.nombre ?? row.advisor_name ?? '').trim() === ag
+                );
+              }
+            } else {
+              try {
+                const raw = await API.asesores(f.desde, f.hasta, DASHBOARD_QUERY.group_by_asesores);
+                list = normalizeAsesoresRows(raw);
+              } catch (_) {}
+              if (!list.length) list = normalizeAsesoresRows(data.asesores);
+            }
             if (list.length) merged = { ...data, asesores: list };
           } catch (e) {
             console.warn('Métricas por asesor:', e.message || e);
           }
         }
         switch (section) {
-          case 'overview': renderOverview(merged); break;
-          case 'asesores': renderAsesores(merged); break;
+          case 'overview': {
+            let ov = merged;
+            const agOv = getAgentNombre();
+            if (agOv) ov = await enrichOverviewDataForAsesor(merged, agOv);
+            renderOverview(ov);
+            await loadOverviewNuevasMetricas();
+            break;
+          }
+          case 'asesores':
+            renderAsesores(merged);
+            break;
         }
         setConnection('connected', merged.dashboard_schema_version);
       }
@@ -1032,6 +1253,53 @@
   /** Si la consulta dedicada viene vacía, usa el bloque del resumen general */
   async function loadPropuestasFromApi() {
     const f = getFilters();
+    const ag = getAgentNombre();
+    const dashOpts = { ...DASHBOARD_QUERY };
+
+    if (ag) {
+      let rubrosRaw;
+      let motivosRaw = [];
+      let motivosAgrupadosRaw = {};
+      try {
+        const raw = await API.asesor(ag, f.desde, f.hasta);
+        rubrosRaw = raw.propuestas_por_rubro ?? raw.propuestasPorRubro ?? raw.data?.propuestas_por_rubro;
+        motivosRaw = raw.motivos_perdida ?? raw.motivosPerdida ?? [];
+      } catch (e) {
+        console.warn('Propuestas (asesor):', e.message || e);
+      }
+      try {
+        motivosAgrupadosRaw = await API.motivosPerdidaAgrupados(f.desde, f.hasta, ag).catch(() => ({}));
+      } catch (_) {}
+      let rows = normalizePropuestasPorRubro(rubrosRaw || []).map(mapRubroApi);
+      if (!rows.length) {
+        try {
+          await ensureDashboardData();
+          const row = findMatchingAsesorRow(normalizeAsesoresRows(dashboardData.asesores), ag);
+          if (row) {
+            const c = num(row.propuestas);
+            const vc = num(row.ventas_cerradas);
+            const vp = num(row.ventas_perdidas);
+            let tasa = 0;
+            if (c > 0) tasa = (vc / c) * 100;
+            else if (vc + vp > 0) tasa = (vc / (vc + vp)) * 100;
+            rows = [
+              {
+                rubro: `Resumen · ${ag}`,
+                cantidad: c,
+                ventas_cerradas: vc,
+                ventas_perdidas: vp,
+                tasa
+              }
+            ];
+          }
+        } catch (_) {}
+      }
+      const motivosList = normalizeMotivosPerdida(motivosRaw).map(mapMotivoApi).filter((m) => m.texto || m.count);
+      const motivosGrupos = normalizeMotivosAgrupados(motivosAgrupadosRaw);
+      renderPropuestas(rows, motivosList, motivosGrupos);
+      return;
+    }
+
     let rubrosRaw;
     let motivosRaw;
     let motivosAgrupadosRaw = {};
@@ -1044,7 +1312,7 @@
     } catch (err) {
       console.warn('Propuestas (consulta dedicada):', err.message || err);
       try {
-        const dash = await API.dashboard(f.desde, f.hasta, 50, 0, DASHBOARD_QUERY);
+        const dash = await API.dashboard(f.desde, f.hasta, 50, 0, dashOpts);
         rubrosRaw = dash.propuestas_por_rubro ?? dash;
         motivosRaw = dash.motivos_perdida ?? dash.motivosPerdida ?? [];
       } catch (e2) {
@@ -1060,7 +1328,7 @@
 
     if (!rows.length || !hasData(rows)) {
       try {
-        const dash = await API.dashboard(f.desde, f.hasta, 50, 0, DASHBOARD_QUERY);
+        const dash = await API.dashboard(f.desde, f.hasta, 50, 0, dashOpts);
         const fromDash = normalizePropuestasPorRubro(dash.propuestas_por_rubro ?? dash).map(mapRubroApi);
         if (fromDash.length) rows = fromDash;
       } catch (_) {}
@@ -1074,13 +1342,47 @@
   /** 6.6 — fusionar global+raíz; si falta algo, intentar bloque negociacion del dashboard */
   async function loadNegociacionFromApi() {
     const f = getFilters();
+    const ag = getAgentNombre();
+    const dashOpts = { ...DASHBOARD_QUERY };
+
+    if (ag) {
+      let raw = {};
+      try {
+        const one = await API.asesor(ag, f.desde, f.hasta);
+        raw = one.negociacion ?? one.data?.negociacion ?? one;
+      } catch (e) {
+        console.warn('Negociación (asesor):', e.message || e);
+      }
+      let { global: g, porRubro } = normalizeNegociacion(raw);
+      if (!porRubro.length) {
+        try {
+          await ensureDashboardData();
+          const row = findMatchingAsesorRow(normalizeAsesoresRows(dashboardData.asesores), ag);
+          if (row) {
+            porRubro = [
+              {
+                rubro: `Resumen · ${ag}`,
+                casos: num(row.propuestas ?? row.casos ?? row.reuniones),
+                negociaciones: num(
+                  row.negociaciones ?? row.con_negociacion ?? row.cliente_ha_negociado
+                ),
+                media_equipos: num(row.media_equipos ?? row.promedio_equipos)
+              }
+            ];
+          }
+        } catch (_) {}
+      }
+      renderNegociacion(g, porRubro.map(mapNegRubroApi));
+      return;
+    }
+
     let raw;
     try {
       raw = await API.negociacion(f.desde, f.hasta);
     } catch (err) {
       console.warn('Negociación (consulta dedicada):', err.message || err);
       try {
-        const dash = await API.dashboard(f.desde, f.hasta, 30, 0, DASHBOARD_QUERY);
+        const dash = await API.dashboard(f.desde, f.hasta, 30, 0, dashOpts);
         raw = dash.negociacion ?? dash.data?.negociacion ?? {};
       } catch (e2) {
         console.warn('Negociación (fallback dashboard):', e2.message || e2);
@@ -1096,7 +1398,7 @@
 
     if (needDash) {
       try {
-        const dash = await API.dashboard(f.desde, f.hasta, 30, 0, DASHBOARD_QUERY);
+        const dash = await API.dashboard(f.desde, f.hasta, 30, 0, dashOpts);
         const merged = normalizeNegociacion(dash.negociacion ?? {});
         Object.assign(g, merged.global);
         if (!porRubro.length && merged.porRubro.length) porRubro = merged.porRubro;
@@ -1217,6 +1519,120 @@
     return out;
   }
 
+  function findMatchingAsesorRow(rows, ag) {
+    if (!ag || !Array.isArray(rows)) return null;
+    const n = normName(ag);
+    for (const row of rows) {
+      if (!row || typeof row !== 'object') continue;
+      const label = String(row.nombre ?? row.advisor_name ?? row.nombre_vendedor ?? '').trim();
+      if (!label) continue;
+      if (normName(label) === n || label === ag) return row;
+    }
+    return null;
+  }
+
+  /** Sustituye KPIs globales por los de una fila de métricas de asesor (bundle o /metrics/asesor). */
+  function applyAsesorRowToOverview(globalData, row) {
+    if (!row || !globalData) return globalData;
+    const rec = (v, d = 0) => {
+      const x = Number(v);
+      return Number.isFinite(x) ? x : d;
+    };
+    const reuniones = rec(
+      row.reuniones ?? row.reuniones_total ?? row.total_reuniones ?? row.totalReuniones
+    );
+    const conRetro = rec(
+      row.con_retro ?? row.reuniones_con_retro ?? row.reunionesConRetro ?? row.con_retroalimentacion
+    );
+    const sinRetro = row.reuniones_sin_retro ?? row.sin_retro ?? row.reunionesSinRetro;
+    const slice = {
+      total_auditorias: rec(
+        row.total_auditorias ??
+          row.auditorias ??
+          row.totalAuditorias ??
+          row.audits ??
+          row.audits_count ??
+          reuniones
+      ),
+      leads_aceptados: rec(
+        row.aceptaciones ?? row.leads_aceptados ?? row.leadsAceptados ?? row.aceptados
+      ),
+      leads_rechazados: rec(
+        row.rechazos ?? row.leads_rechazados ?? row.leadsRechazados ?? row.rechazados
+      ),
+      leads_pendientes: rec(
+        row.pendientes ?? row.leads_pendientes ?? row.leadsPendientes ?? row.pendiente
+      ),
+      reuniones_total: reuniones,
+      reuniones_con_retro: conRetro,
+      reuniones_sin_retro:
+        sinRetro !== undefined && sinRetro !== null && sinRetro !== ''
+          ? rec(sinRetro)
+          : Math.max(0, reuniones - conRetro),
+      promedio_minutos_retro: firstNum(
+        row.promedio_min_retro,
+        row.promedio_minutos_retro,
+        row.promedioMinutosRetro,
+        row.promedio_retro
+      ),
+      propuestas_registradas: rec(
+        row.propuestas ?? row.propuestas_registradas ?? row.propuestasRegistradas ?? row.total_propuestas
+      ),
+      ventas_cerradas: rec(row.ventas_cerradas ?? row.ventasCerradas ?? row.cerradas),
+      ventas_perdidas: rec(row.ventas_perdidas ?? row.ventasPerdidas ?? row.perdidas),
+      ventas_en_seguimiento: rec(
+        row.ventas_en_seguimiento ??
+          row.ventasEnSeguimiento ??
+          row.seguimientos_registrados ??
+          row.en_seguimiento
+      ),
+      media_notiREU: firstNum(
+        row.notiREU_promedio,
+        row.notireu_promedio,
+        row.media_notiREU,
+        row.mediaNotiREU,
+        row.notiREU
+      )
+    };
+    const prev = mergeResumenSources(globalData);
+    return { ...globalData, resumen: { ...prev, ...slice }, _overviewAsesorMatched: true };
+  }
+
+  async function enrichOverviewDataForAsesor(globalData, ag) {
+    if (!ag || !globalData) return globalData;
+    let row = findMatchingAsesorRow(normalizeAsesoresRows(globalData.asesores), ag);
+    if (!row) {
+      try {
+        const f = getFilters();
+        const raw = await API.asesor(ag, f.desde, f.hasta);
+        const rows = normalizeAsesoresRows(raw);
+        row = findMatchingAsesorRow(rows, ag) ?? (rows.length === 1 ? rows[0] : null);
+      } catch (_) {}
+    }
+    if (!row) return { ...globalData, _overviewAsesorMatched: false };
+    return applyAsesorRowToOverview(globalData, row);
+  }
+
+  function reunionRowMatchesAsesor(r, ag) {
+    if (!ag) return true;
+    const n = normName(ag);
+    const nm = normName(r.advisor_name ?? r.nombre_asesor ?? r.asesor ?? r.nombre_vendedor ?? '');
+    return nm === n || String(r.advisor_name ?? '').trim() === ag;
+  }
+
+  function metricRowMatchesAsesorFilter(row, ag) {
+    if (!ag || !row || typeof row !== 'object') return true;
+    const n = normName(ag);
+    for (const k of Object.keys(row)) {
+      if (!/nombre|asesor|advisor|vendedor|label|grupo|clave|name/i.test(k)) continue;
+      const v = row[k];
+      if (v == null) continue;
+      const s = String(v).trim();
+      if (normName(s) === n || s === ag) return true;
+    }
+    return false;
+  }
+
   function normalizeResumen(data) {
     const m = mergeResumenSources(data);
     const pick = (...keys) => {
@@ -1269,6 +1685,21 @@
   //  OVERVIEW  (data.resumen)
   // ═══════════════════════════════════════════════
   function renderOverview(data) {
+    const ag = getAgentNombre();
+    const scope = $('#overviewKpiScope');
+    if (scope) {
+      if (ag) {
+        const matched = data && data._overviewAsesorMatched === true;
+        scope.textContent = matched
+          ? `Estas tarjetas muestran métricas solo del asesor: ${ag}`
+          : `Asesor «${ag}» seleccionado: no hay fila de métricas por asesor en los datos; las cifras son totales globales.`;
+        scope.classList.toggle('overview-kpi-scope--warn', !matched);
+      } else {
+        scope.textContent = 'Métricas consolidadas de todos los asesores.';
+        scope.classList.remove('overview-kpi-scope--warn');
+      }
+    }
+
     const r = normalizeResumen(data);
 
     $('#kpi-auditorias').textContent = fmt(r.total_auditorias);
@@ -1340,6 +1771,10 @@
   }
 
   $('#asesorMetricSelect')?.addEventListener('change', (e) => renderAsesoresChart(e.target.value));
+
+  $('#selectOverviewTiempoRespGroup')?.addEventListener('change', () => {
+    loadOverviewNuevasMetricas().catch((e) => console.warn(e));
+  });
 
   function renderAsesoresTable(list) {
     const tbody = $('#tbodyAsesores');
@@ -1498,7 +1933,9 @@
   async function loadReuniones() {
     const f = getFilters();
     const data = await API.reuniones(f.desde, f.hasta, REUNIONES_LIMIT, reunionesPage * REUNIONES_LIMIT);
-    const list = Array.isArray(data) ? data : (data.reuniones || data.items || []);
+    let list = Array.isArray(data) ? data : (data.reuniones || data.items || []);
+    const ag = getAgentNombre();
+    if (ag) list = list.filter((r) => reunionRowMatchesAsesor(r, ag));
     renderReunionesTable(list);
     updatePagination(list.length);
   }
@@ -1551,6 +1988,170 @@
       .replace(/_/g, ' ')
       .replace(/([a-z])([A-Z])/g, '$1 $2')
       .replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+
+  function isNumericLike(v) {
+    if (v === null || v === undefined) return false;
+    if (typeof v === 'number' && Number.isFinite(v)) return true;
+    if (typeof v === 'string' && String(v).trim() !== '') {
+      const n = Number(String(v).replace(',', '.'));
+      return Number.isFinite(n);
+    }
+    return false;
+  }
+
+  function numericCell(v) {
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    const n = Number(String(v).replace(',', '.'));
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  /** Convierte { "Pedro": 12.3, "Ana": 5 } en filas para gráficos. */
+  function objectMapToMetricRows(obj) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return [];
+    const skip = new Set(['items', 'data', 'rows', 'meta', 'success', 'ok', 'message', 'detail', 'error']);
+    const entries = Object.entries(obj).filter(([k]) => !skip.has(k));
+    if (!entries.length) return [];
+    const allPrimitive = entries.every(([, v]) => isNumericLike(v) || typeof v === 'string');
+    if (!allPrimitive) return [];
+    const allNumericVals = entries.every(([, v]) => isNumericLike(v));
+    if (allNumericVals) {
+      return entries.map(([k, v]) => ({ label: k, valor: numericCell(v) }));
+    }
+    return [];
+  }
+
+  function normMetricRows(raw) {
+    if (Array.isArray(raw)) return raw.filter((x) => x && typeof x === 'object' && !Array.isArray(x));
+    if (!raw || typeof raw !== 'object') return [];
+    const inner =
+      raw.items ??
+      raw.data ??
+      raw.rows ??
+      raw.result ??
+      raw.series ??
+      raw.records ??
+      raw.results ??
+      raw.lista ??
+      raw.datos;
+    if (Array.isArray(inner)) return inner.filter((x) => x && typeof x === 'object' && !Array.isArray(x));
+    if (inner && typeof inner === 'object' && !Array.isArray(inner)) {
+      const deep = inner.rows ?? inner.items ?? inner.data ?? inner.results;
+      if (Array.isArray(deep)) return deep.filter((x) => x && typeof x === 'object' && !Array.isArray(x));
+    }
+    for (const k of Object.keys(raw)) {
+      const v = raw[k];
+      if (Array.isArray(v) && v.length && typeof v[0] === 'object' && !Array.isArray(v[0])) return v;
+    }
+    const fromMap = objectMapToMetricRows(raw);
+    if (fromMap.length) return fromMap;
+    return [];
+  }
+
+  function pickMetricBarSeries(rows) {
+    if (!rows.length) return { labels: [], values: [], yLabel: 'Valor' };
+    const r0 = rows[0];
+    const keys = Object.keys(r0);
+    const labelKey =
+      keys.find((k) =>
+        /nombre|asesor|pais|country|fuente|source|label|categoria|name|vendedor|grupo|clave|advisor|etapa/i.test(k)
+      ) || keys[0];
+    const numericKeys = keys.filter((k) => k !== labelKey && isNumericLike(r0[k]));
+    const valueKey =
+      numericKeys.find((k) =>
+        /promedio|minutos|total|count|avg|media|sum|nivel|noti|frecuencia|veces|escalaci|cantidad|cuenta|valor|value/i.test(
+          k
+        )
+      ) ||
+      numericKeys[0] ||
+      keys.find((k) => k !== labelKey && isNumericLike(r0[k]));
+    const yLabel = valueKey ? humanizeFieldKey(valueKey) : 'Valor';
+    const labels = rows.map((r) => String(r[labelKey] ?? '—'));
+    const values = rows.map((r) => numericCell(r[valueKey]));
+    return { labels, values, yLabel };
+  }
+
+  function warnIfUnparsed(raw, label) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return;
+    const rows = normMetricRows(raw);
+    if (rows.length) return;
+    if (!Object.keys(raw).length) return;
+    if (raw.detail != null) {
+      console.warn(`[metrics] ${label}:`, raw.detail);
+      return;
+    }
+    console.warn(`[metrics] ${label}: formato de respuesta no reconocido (revisar pestaña Red):`, raw);
+  }
+
+  async function loadOverviewNuevasMetricas() {
+    const f = getFilters();
+    const groupBy = $('#selectOverviewTiempoRespGroup')?.value || 'asesor';
+    let tiempoRows = [];
+    let nivelesRows = [];
+    try {
+      const agn = getAgentNombre();
+      const [tr, ne] = await Promise.all([
+        API.tiempoRespuesta(f.desde, f.hasta, groupBy).catch((err) => {
+          console.warn('[metrics] tiempo-respuesta HTTP/error:', err?.message || err);
+          return {};
+        }),
+        API.nivelesEscalacion(f.desde, f.hasta).catch((err) => {
+          console.warn('[metrics] niveles-escalacion HTTP/error:', err?.message || err);
+          return {};
+        })
+      ]);
+      tiempoRows = normMetricRows(tr).filter((row) => metricRowMatchesAsesorFilter(row, agn));
+      nivelesRows = normMetricRows(ne).filter((row) => metricRowMatchesAsesorFilter(row, agn));
+      warnIfUnparsed(tr, 'tiempo-respuesta');
+      warnIfUnparsed(ne, 'niveles-escalacion');
+    } catch (e) {
+      console.warn('Métricas tiempo-respuesta / escalación:', e.message || e);
+    }
+
+    const t1 = pickMetricBarSeries(tiempoRows);
+    if (t1.labels.length) {
+      Charts.barVertical('chartOverviewTiempoResp', t1.labels, [
+        {
+          label: t1.yLabel,
+          data: t1.values,
+          backgroundColor: '#145478',
+          borderRadius: 3
+        }
+      ], false);
+    } else {
+      Charts.barVertical(
+        'chartOverviewTiempoResp',
+        ['—'],
+        [{ label: 'Sin datos', data: [0], backgroundColor: '#94a3b8', borderRadius: 3 }],
+        false
+      );
+    }
+
+    const t2 = pickMetricBarSeries(nivelesRows);
+    if (t2.labels.length) {
+      Charts.barVertical('chartOverviewNivelesEsc', t2.labels, [
+        {
+          label: t2.yLabel,
+          data: t2.values,
+          backgroundColor: '#c8151b',
+          borderRadius: 3
+        }
+      ], false);
+    } else {
+      Charts.barVertical(
+        'chartOverviewNivelesEsc',
+        ['—'],
+        [{ label: 'Sin datos', data: [0], backgroundColor: '#94a3b8', borderRadius: 3 }],
+        false
+      );
+    }
+
+    requestAnimationFrame(() => {
+      ['chartOverviewTiempoResp', 'chartOverviewNivelesEsc'].forEach((id) => {
+        const ch = Charts.instances[id];
+        if (ch?.resize) ch.resize();
+      });
+    });
   }
 
   /** Maquetación de propuesta_json al estilo del dashboard (sin JSON crudo). */
@@ -1720,6 +2321,16 @@
     loadGestionAsesores().catch((err) => console.warn(err));
   });
 
+  $('#btnGestionNuevoAsesor')?.addEventListener('click', openNuevoAsesorModal);
+  $('#btnCloseNuevoAsesor')?.addEventListener('click', closeNuevoAsesorModal);
+  $('#btnNuevoAsesorCancel')?.addEventListener('click', closeNuevoAsesorModal);
+  $('#formNuevoAsesor')?.addEventListener('submit', (ev) => {
+    submitNuevoAsesor(ev).catch((err) => console.warn(err));
+  });
+  $('#modalNuevoAsesor')?.addEventListener('click', (ev) => {
+    if (ev.target.id === 'modalNuevoAsesor') closeNuevoAsesorModal();
+  });
+
   $$('[data-origen-agrup]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const v = btn.getAttribute('data-origen-agrup');
@@ -1752,9 +2363,19 @@
     setLoading(true);
     setConnection('');
     triggerTitleUnderline();
+    updateAgentFilterVisibility();
     try {
+      try {
+        await refreshAgentFilterOptions(false);
+      } catch (_) {}
       const data = await ensureDashboardData();
-      renderOverview(data);
+      try {
+        await refreshAgentFilterOptions(true);
+      } catch (_) {}
+      let viewOverview = data;
+      if (getAgentNombre()) viewOverview = await enrichOverviewDataForAsesor(data, getAgentNombre());
+      renderOverview(viewOverview);
+      await loadOverviewNuevasMetricas();
       setConnection('connected', data.dashboard_schema_version);
     } catch (err) {
       console.error('Error al cargar el panel:', err.message || err);

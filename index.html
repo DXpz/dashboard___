@@ -7,7 +7,7 @@
   <title>Dashboard — Métricas de Asesores de Ventas</title>
   <link rel="icon" type="image/png" href="logo.png">
   <link rel="apple-touch-icon" href="logo.png">
-  <link rel="stylesheet" href="css/styles.css?v=20260430d">
+  <link rel="stylesheet" href="css/styles.css?v=20260409f">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
@@ -15,7 +15,7 @@
 <body>
 
   <!-- Sidebar: en escritorio se despliega al pasar el ratón por el borde izquierdo -->
-  <div class="sidebar-dock" aria-label="Menú lateral">
+  <div class="sidebar-dock" id="sidebarDock" aria-label="Menú lateral">
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-header">
       <div class="logo">
@@ -75,6 +75,12 @@
             <label for="hasta">Hasta</label>
             <input type="date" id="hasta">
           </div>
+          <div class="filter-group filter-asesor-wrap" id="filterAsesorWrap">
+            <label for="filterAsesor">Asesor</label>
+            <select id="filterAsesor" title="Desempeño filtrado por asesor (no aplica en Origen de leads)">
+              <option value="">Todos los asesores</option>
+            </select>
+          </div>
           <button class="btn btn-primary" id="btnFiltrar">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
             Filtrar
@@ -84,8 +90,11 @@
           </button>
         </div>
         <div class="connection-status" id="connectionStatus">
-          <span class="status-dot"></span>
-          <span class="status-text">Conectando...</span>
+          <div class="connection-status-main">
+            <span class="status-dot"></span>
+            <span class="status-text">Conectando...</span>
+          </div>
+          <p class="status-hint hidden" id="connectionHint" role="status"></p>
         </div>
       </div>
     </header>
@@ -95,6 +104,7 @@
 
       <!-- ==================== SECTION: OVERVIEW ==================== -->
       <section class="section" id="section-overview">
+        <p class="overview-kpi-scope" id="overviewKpiScope" aria-live="polite"></p>
         <!-- KPI Cards -->
         <div class="kpi-grid" id="kpiGrid">
           <div class="kpi-card">
@@ -210,6 +220,33 @@
             </div>
             <div class="chart-body">
               <canvas id="chartRetro"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Métricas API: tiempo-respuesta y niveles-escalación (doc §3.5) -->
+        <div class="charts-row two-cols">
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3>Tiempo de respuesta</h3>
+              <div class="chart-actions">
+                <select id="selectOverviewTiempoRespGroup" class="select-small" title="Agrupación">
+                  <option value="asesor">Por asesor</option>
+                  <option value="pais">Por país</option>
+                  <option value="fuente">Por fuente</option>
+                </select>
+              </div>
+            </div>
+            <div class="chart-body">
+              <canvas id="chartOverviewTiempoResp"></canvas>
+            </div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3>Niveles de escalación</h3>
+            </div>
+            <div class="chart-body">
+              <canvas id="chartOverviewNivelesEsc"></canvas>
             </div>
           </div>
         </div>
@@ -402,7 +439,6 @@
             <button type="button" class="origen-segment-btn active" data-origen-agrup="week">Semana</button>
             <button type="button" class="origen-segment-btn" data-origen-agrup="month">Mes</button>
           </div>
-          <p class="origen-leads-hint" id="origenLeadsHint"></p>
         </div>
 
         <div class="kpi-grid kpi-grid-origen">
@@ -475,18 +511,12 @@
 
       <!-- ==================== SECTION: GESTIÓN ASESORES (activar / desactivar / eliminar) ==================== -->
       <section class="section hidden" id="section-gestion-asesores">
-        <div class="gestion-intro chart-card full-width">
-          <p class="gestion-intro-text">
-            <strong>Activo</strong>: el asesor puede recibir nuevas reuniones.
-            <strong>Desactivado</strong>: no disponible (vacaciones, baja médica, etc.).
-            <strong>Eliminar</strong>: cuando deja la empresa; se pide confirmación en dos pasos (escribir <code>ELIMINAR</code>).
-          </p>
-          <p class="gestion-intro-hint" id="gestionSourceHint"></p>
-        </div>
         <div class="chart-card full-width">
           <div class="chart-header">
             <h3>Asesores</h3>
             <div class="chart-actions">
+              <input type="text" id="gestionFilterPais" class="input-search gestion-pais-filter" maxlength="8" placeholder="País" />
+              <button type="button" class="btn btn-sm btn-primary" id="btnGestionNuevoAsesor" title="Añadir asesor">Nuevo asesor</button>
               <button type="button" class="btn btn-sm btn-ghost" id="btnGestionRefresh" title="Recargar lista">Actualizar</button>
             </div>
           </div>
@@ -507,6 +537,46 @@
           <button type="button" class="btn btn-sm btn-ghost" id="btnClosePropHist" aria-label="Cerrar">&times;</button>
         </div>
         <div class="modal-body-scroll" id="modalPropHistBody"></div>
+      </div>
+    </div>
+
+    <div class="modal-overlay hidden" id="modalNuevoAsesor" role="dialog" aria-modal="true" aria-labelledby="modalNuevoAsesorTitle">
+      <div class="modal-panel modal-panel--narrow modal-panel--nuevo-asesor">
+        <div class="modal-head modal-head--accent">
+          <h3 id="modalNuevoAsesorTitle">Nuevo asesor</h3>
+          <button type="button" class="btn btn-sm btn-modal-icon-close" id="btnCloseNuevoAsesor" aria-label="Cerrar">&times;</button>
+        </div>
+        <form class="modal-body-scroll modal-body--nuevo-asesor" id="formNuevoAsesor" autocomplete="on">
+          <div class="modal-form-row">
+            <label class="modal-form-label" for="nuevoAsesorNombre">Nombre</label>
+            <input type="text" id="nuevoAsesorNombre" class="input-modal-field" required maxlength="200" autocomplete="name" placeholder="Nombre completo" />
+          </div>
+          <div class="modal-form-row">
+            <label class="modal-form-label" for="nuevoAsesorCorreo">Correo</label>
+            <input type="email" id="nuevoAsesorCorreo" class="input-modal-field" required maxlength="200" autocomplete="email" placeholder="Correo electrónico" />
+          </div>
+          <div class="modal-form-row">
+            <label class="modal-form-label" for="nuevoAsesorPais">País</label>
+            <input type="text" id="nuevoAsesorPais" class="input-modal-field" required maxlength="120" autocomplete="country-name" placeholder="País" />
+          </div>
+          <fieldset class="modal-form-fieldset">
+            <legend class="modal-form-label" id="legendDisponible">Disponible para nuevas reuniones</legend>
+            <div class="modal-radio-row">
+              <label class="modal-radio-label">
+                <input type="radio" name="nuevoAsesorActivo" value="true" checked required />
+                Sí
+              </label>
+              <label class="modal-radio-label">
+                <input type="radio" name="nuevoAsesorActivo" value="false" />
+                No
+              </label>
+            </div>
+          </fieldset>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" id="btnNuevoAsesorCancel">Cancelar</button>
+            <button type="submit" class="btn btn-primary" id="btnNuevoAsesorGuardar">Crear asesor</button>
+          </div>
+        </form>
       </div>
     </div>
 
@@ -535,8 +605,8 @@
     <div class="toast" id="appToast" role="status" aria-live="polite" hidden></div>
   </main>
 
-  <script src="js/api.js?v=20260401c"></script>
+  <script src="js/api.js?v=20260409a"></script>
   <script src="js/charts.js?v=20260402c"></script>
-  <script src="js/dashboard.js?v=20260401b"></script>
+  <script src="js/dashboard.js?v=20260409d"></script>
 </body>
 </html>
