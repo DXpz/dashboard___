@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#145478">
+  <title>Dashboard — Métricas de Asesores de Ventas</title>
+  <link rel="icon" type="image/png" href="logo.png">
+  <link rel="apple-touch-icon" href="logo.png">
+  <link rel="stylesheet" href="css/styles.css?v=20260409f">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+  <!-- Sidebar: en escritorio se despliega al pasar el ratón por el borde izquierdo -->
+  <div class="sidebar-dock" id="sidebarDock" aria-label="Menú lateral">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">
+        <img src="logo.png" alt="RED" class="logo-img">
+      </div>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="#" class="nav-item active" data-section="overview">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        <span class="nav-item-label">Resumen General</span>
+      </a>
+      <a href="#" class="nav-item" data-section="asesores">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span class="nav-item-label">Asesores</span>
+      </a>
+      <a href="#" class="nav-item" data-section="propuestas">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        <span class="nav-item-label">Propuestas</span>
+      </a>
+      <a href="#" class="nav-item" data-section="negociacion">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        <span class="nav-item-label">Negociación</span>
+      </a>
+      <a href="#" class="nav-item" data-section="reuniones">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        <span class="nav-item-label">Reuniones</span>
+      </a>
+      <a href="#" class="nav-item" data-section="origen-leads">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+        <span class="nav-item-label">Origen leads</span>
+      </a>
+      <a href="#" class="nav-item" data-section="gestion-asesores">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+        <span class="nav-item-label">Gestión asesores</span>
+      </a>
+    </nav>
+  </aside>
+  </div>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <!-- Top Bar -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <button class="menu-toggle" id="menuToggle">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
+        <h1 class="page-title" id="pageTitle">Resumen General</h1>
+      </div>
+      <div class="topbar-right">
+        <div class="date-filters">
+          <div class="filter-group">
+            <label for="desde">Desde</label>
+            <input type="date" id="desde">
+          </div>
+          <div class="filter-group">
+            <label for="hasta">Hasta</label>
+            <input type="date" id="hasta">
+          </div>
+          <div class="filter-group filter-asesor-wrap" id="filterAsesorWrap">
+            <label for="filterAsesor">Asesor</label>
+            <select id="filterAsesor" title="Desempeño filtrado por asesor (no aplica en Origen de leads)">
+              <option value="">Todos los asesores</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" id="btnFiltrar">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+            Filtrar
+          </button>
+          <button class="btn btn-ghost" id="btnLimpiar" title="Limpiar filtros">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+          </button>
+        </div>
+        <div class="connection-status" id="connectionStatus">
+          <div class="connection-status-main">
+            <span class="status-dot"></span>
+            <span class="status-text">Conectando...</span>
+          </div>
+          <p class="status-hint hidden" id="connectionHint" role="status"></p>
+        </div>
+      </div>
+    </header>
+
+    <!-- Content Area -->
+    <div class="content-area" id="contentArea">
+
+      <!-- ==================== SECTION: OVERVIEW ==================== -->
+      <section class="section" id="section-overview">
+        <p class="overview-kpi-scope" id="overviewKpiScope" aria-live="polite"></p>
+        <!-- KPI Cards -->
+        <div class="kpi-grid" id="kpiGrid">
+          <div class="kpi-card">
+            <div class="kpi-icon blue">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+            </div>
+            <div class="kpi-info">
+              <span class="kpi-value" id="kpi-auditorias">—</span>
+              <span class="kpi-label">Auditorías</span>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon green">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            </div>
+            <div class="kpi-info">
+              <span class="kpi-value" id="kpi-aceptados">—</span>
+              <span class="kpi-label">Leads Aceptados</span>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon orange">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </div>
+            <div class="kpi-info">
+              <span class="kpi-value" id="kpi-pendientes">—</span>
+              <span class="kpi-label">Leads Pendientes</span>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon red">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+            </div>
+            <div class="kpi-info">
+              <span class="kpi-value" id="kpi-rechazados">—</span>
+              <span class="kpi-label">Leads Rechazados</span>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon purple">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            </div>
+            <div class="kpi-info">
+              <span class="kpi-value" id="kpi-reuniones">—</span>
+              <span class="kpi-label">Reuniones</span>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon teal">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </div>
+            <div class="kpi-info">
+              <span class="kpi-value" id="kpi-tiempoRetro">—</span>
+              <span class="kpi-label">Prom. min a Retro</span>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon cyan">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            </div>
+            <div class="kpi-info">
+              <span class="kpi-value" id="kpi-propuestas">—</span>
+              <span class="kpi-label">Propuestas</span>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon emerald">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            </div>
+            <div class="kpi-info">
+              <span class="kpi-value" id="kpi-ventasCerradas">—</span>
+              <span class="kpi-label">Ventas Cerradas</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Charts Row 1 -->
+        <div class="charts-row two-cols">
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3>Estado de Leads</h3>
+            </div>
+            <div class="chart-body">
+              <canvas id="chartLeads"></canvas>
+            </div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3>Pipeline de Ventas</h3>
+            </div>
+            <div class="chart-body">
+              <canvas id="chartVentas"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Charts Row 2 -->
+        <div class="charts-row two-cols">
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3>Notificaciones Promedio (notiREU)</h3>
+            </div>
+            <div class="chart-body">
+              <div class="gauge-container" id="gaugeNotiREU">
+                <div class="gauge-value" id="gaugeNotiValue">—</div>
+                <div class="gauge-label">promedio de notificaciones</div>
+              </div>
+            </div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3>Reuniones: con vs sin Retro</h3>
+            </div>
+            <div class="chart-body">
+              <canvas id="chartRetro"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Métricas API: tiempo-respuesta y niveles-escalación (doc §3.5) -->
+        <div class="charts-row two-cols">
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3>Tiempo de respuesta</h3>
+              <div class="chart-actions">
+                <select id="selectOverviewTiempoRespGroup" class="select-small" title="Agrupación">
+                  <option value="asesor">Por asesor</option>
+                  <option value="pais">Por país</option>
+                  <option value="fuente">Por fuente</option>
+                </select>
+              </div>
+            </div>
+            <div class="chart-body">
+              <canvas id="chartOverviewTiempoResp"></canvas>
+            </div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3>Niveles de escalación</h3>
+            </div>
+            <div class="chart-body">
+              <canvas id="chartOverviewNivelesEsc"></canvas>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== SECTION: ASESORES ==================== -->
+      <section class="section hidden" id="section-asesores">
+        <div class="charts-row single">
+          <div class="chart-card full-width">
+            <div class="chart-header">
+              <h3>Rendimiento por Asesor</h3>
+              <div class="chart-actions">
+                <select id="asesorMetricSelect" class="select-small">
+                  <option value="reuniones">Reuniones</option>
+                  <option value="aceptaciones">Aceptaciones</option>
+                  <option value="rechazos">Rechazos</option>
+                  <option value="propuestas">Propuestas</option>
+                  <option value="ventas_cerradas">Ventas Cerradas</option>
+                </select>
+              </div>
+            </div>
+            <div class="chart-body chart-body-tall">
+              <canvas id="chartAsesoresBar"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <div class="chart-card full-width">
+          <div class="chart-header">
+            <h3>Tabla de Asesores</h3>
+            <div class="chart-actions">
+              <input type="text" placeholder="Buscar asesor..." id="searchAsesor" class="input-search">
+            </div>
+          </div>
+          <div class="table-wrapper">
+            <table class="data-table" id="tablaAsesores">
+              <thead>
+                <tr>
+                  <th data-sort="nombre">Asesor</th>
+                  <th data-sort="reuniones">Reuniones</th>
+                  <th data-sort="aceptaciones">Aceptados</th>
+                  <th data-sort="rechazos">Rechazos</th>
+                  <th data-sort="con_retro">Con Retro</th>
+                  <th data-sort="promedio_min_retro">Prom. Min Retro</th>
+                  <th data-sort="notiREU_promedio">Noti REU</th>
+                  <th data-sort="propuestas">Propuestas</th>
+                  <th data-sort="ventas_cerradas">V. Cerradas</th>
+                  <th data-sort="ventas_perdidas">V. Perdidas</th>
+                </tr>
+              </thead>
+              <tbody id="tbodyAsesores"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== SECTION: PROPUESTAS ==================== -->
+      <section class="section hidden" id="section-propuestas">
+        <div class="charts-row two-cols">
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3>Propuestas por Rubro</h3>
+            </div>
+            <div class="chart-body chart-body-tall">
+              <canvas id="chartPropuestasRubro"></canvas>
+            </div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3>Tasa de Cierre por Rubro</h3>
+            </div>
+            <div class="chart-body chart-body-tall">
+              <canvas id="chartTasaCierre"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <div class="charts-row two-cols">
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3>Motivos de pérdida (detalle)</h3>
+            </div>
+            <div class="chart-body chart-body-tall">
+              <canvas id="chartMotivos"></canvas>
+            </div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3>Motivos por categoría</h3>
+            </div>
+            <div class="chart-body chart-body-tall">
+              <canvas id="chartMotivosCat"></canvas>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== SECTION: NEGOCIACION ==================== -->
+      <section class="section hidden" id="section-negociacion">
+        <div class="kpi-grid kpi-grid-4" id="kpiNegociacion">
+          <div class="kpi-card">
+            <div class="kpi-icon blue">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            </div>
+            <div class="kpi-info">
+              <span class="kpi-value" id="kpi-seguimientos">—</span>
+              <span class="kpi-label">Seguimientos</span>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon green">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+            </div>
+            <div class="kpi-info">
+              <span class="kpi-value" id="kpi-clienteNegocia">—</span>
+              <span class="kpi-label">Cliente ha Negociado</span>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon purple">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>
+            </div>
+            <div class="kpi-info">
+              <span class="kpi-value" id="kpi-pctNegociacion">—</span>
+              <span class="kpi-label">% Negociación</span>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon teal">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+            </div>
+            <div class="kpi-info">
+              <span class="kpi-value" id="kpi-mediaEquipos">—</span>
+              <span class="kpi-label">Media Equipos</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="chart-card full-width">
+          <div class="chart-header">
+            <h3>Negociación por Rubro</h3>
+          </div>
+          <div class="chart-body chart-body-tall">
+            <canvas id="chartNegociacionRubro"></canvas>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== SECTION: REUNIONES ==================== -->
+      <section class="section hidden" id="section-reuniones">
+        <div class="chart-card full-width">
+          <div class="chart-header">
+            <h3>Listado de Reuniones</h3>
+            <div class="chart-actions">
+              <input type="text" placeholder="Buscar cliente o asesor..." id="searchReunion" class="input-search">
+              <button class="btn btn-sm btn-ghost" id="btnPrevPage" disabled>&larr; Anterior</button>
+              <span class="pagination-info" id="paginationInfo">Página 1</span>
+              <button class="btn btn-sm btn-ghost" id="btnNextPage">Siguiente &rarr;</button>
+            </div>
+          </div>
+          <div class="table-wrapper">
+            <table class="data-table" id="tablaReuniones">
+              <thead>
+                <tr>
+                  <th>Cliente</th>
+                  <th>Teléfono</th>
+                  <th>Asesor</th>
+                  <th>Asunto</th>
+                  <th>País</th>
+                  <th>Etapa</th>
+                  <th>Estado Asesor</th>
+                  <th>Estado Reunión</th>
+                  <th>Noti REU</th>
+                  <th>Min a Retro</th>
+                  <th>Propuesta</th>
+                </tr>
+              </thead>
+              <tbody id="tbodyReuniones"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== SECTION: ORIGEN DE LEADS ==================== -->
+      <section class="section hidden" id="section-origen-leads">
+        <div class="origen-toolbar chart-card full-width">
+          <p class="origen-toolbar-label">Agrupar evolución por</p>
+          <div class="origen-segment" role="group" aria-label="Agrupación temporal">
+            <button type="button" class="origen-segment-btn" data-origen-agrup="day">Día</button>
+            <button type="button" class="origen-segment-btn active" data-origen-agrup="week">Semana</button>
+            <button type="button" class="origen-segment-btn" data-origen-agrup="month">Mes</button>
+          </div>
+        </div>
+
+        <div class="kpi-grid kpi-grid-origen">
+          <div class="kpi-card">
+            <div class="kpi-icon blue">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            </div>
+            <div class="kpi-info">
+              <span class="kpi-value" id="kpi-origen-total">—</span>
+              <span class="kpi-label">Leads totales</span>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon green">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20v-6M6 20V10M18 20V4"/></svg>
+            </div>
+            <div class="kpi-info">
+              <span class="kpi-value" id="kpi-origen-top">—</span>
+              <span class="kpi-label">Canal con más leads</span>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-icon purple">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/></svg>
+            </div>
+            <div class="kpi-info">
+              <span class="kpi-value" id="kpi-origen-muestra">—</span>
+              <span class="kpi-label">Registros analizados</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="charts-row two-cols origen-charts-row">
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3>Distribución por canal</h3>
+            </div>
+            <div class="chart-body chart-body-origen-donut">
+              <canvas id="chartOrigenDonut"></canvas>
+            </div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3>Leads por canal en el tiempo</h3>
+            </div>
+            <div class="chart-body chart-body-origen-bar">
+              <canvas id="chartOrigenTiempo"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <div class="chart-card full-width">
+          <div class="chart-header">
+            <h3>Detalle por canal</h3>
+          </div>
+          <div class="table-wrapper">
+            <table class="data-table" id="tablaOrigenLeads">
+              <thead>
+                <tr>
+                  <th>Canal</th>
+                  <th>Leads</th>
+                  <th>% del total</th>
+                </tr>
+              </thead>
+              <tbody id="tbodyOrigenLeads"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ==================== SECTION: GESTIÓN ASESORES (activar / desactivar / eliminar) ==================== -->
+      <section class="section hidden" id="section-gestion-asesores">
+        <div class="chart-card full-width">
+          <div class="chart-header">
+            <h3>Asesores</h3>
+            <div class="chart-actions">
+              <input type="text" id="gestionFilterPais" class="input-search gestion-pais-filter" maxlength="8" placeholder="País" />
+              <button type="button" class="btn btn-sm btn-primary" id="btnGestionNuevoAsesor" title="Añadir asesor">Nuevo asesor</button>
+              <button type="button" class="btn btn-sm btn-ghost" id="btnGestionRefresh" title="Recargar lista">Actualizar</button>
+            </div>
+          </div>
+          <div class="gestion-asesores-grid" id="gestionAsesoresList"></div>
+        </div>
+      </section>
+
+      <div class="loading-overlay" id="loadingOverlay">
+        <div class="spinner"></div>
+        <p>Cargando datos...</p>
+      </div>
+    </div>
+
+    <div class="modal-overlay hidden" id="modalPropuestaHistory" role="dialog" aria-modal="true" aria-labelledby="modalPropHistTitle">
+      <div class="modal-panel">
+        <div class="modal-head">
+          <h3 id="modalPropHistTitle">Historial de propuestas</h3>
+          <button type="button" class="btn btn-sm btn-ghost" id="btnClosePropHist" aria-label="Cerrar">&times;</button>
+        </div>
+        <div class="modal-body-scroll" id="modalPropHistBody"></div>
+      </div>
+    </div>
+
+    <div class="modal-overlay hidden" id="modalNuevoAsesor" role="dialog" aria-modal="true" aria-labelledby="modalNuevoAsesorTitle">
+      <div class="modal-panel modal-panel--narrow modal-panel--nuevo-asesor">
+        <div class="modal-head modal-head--accent">
+          <h3 id="modalNuevoAsesorTitle">Nuevo asesor</h3>
+          <button type="button" class="btn btn-sm btn-modal-icon-close" id="btnCloseNuevoAsesor" aria-label="Cerrar">&times;</button>
+        </div>
+        <form class="modal-body-scroll modal-body--nuevo-asesor" id="formNuevoAsesor" autocomplete="on">
+          <div class="modal-form-row">
+            <label class="modal-form-label" for="nuevoAsesorNombre">Nombre</label>
+            <input type="text" id="nuevoAsesorNombre" class="input-modal-field" required maxlength="200" autocomplete="name" placeholder="Nombre completo" />
+          </div>
+          <div class="modal-form-row">
+            <label class="modal-form-label" for="nuevoAsesorCorreo">Correo</label>
+            <input type="email" id="nuevoAsesorCorreo" class="input-modal-field" required maxlength="200" autocomplete="email" placeholder="Correo electrónico" />
+          </div>
+          <div class="modal-form-row">
+            <label class="modal-form-label" for="nuevoAsesorPais">País</label>
+            <input type="text" id="nuevoAsesorPais" class="input-modal-field" required maxlength="120" autocomplete="country-name" placeholder="País" />
+          </div>
+          <fieldset class="modal-form-fieldset">
+            <legend class="modal-form-label" id="legendDisponible">Disponible para nuevas reuniones</legend>
+            <div class="modal-radio-row">
+              <label class="modal-radio-label">
+                <input type="radio" name="nuevoAsesorActivo" value="true" checked required />
+                Sí
+              </label>
+              <label class="modal-radio-label">
+                <input type="radio" name="nuevoAsesorActivo" value="false" />
+                No
+              </label>
+            </div>
+          </fieldset>
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" id="btnNuevoAsesorCancel">Cancelar</button>
+            <button type="submit" class="btn btn-primary" id="btnNuevoAsesorGuardar">Crear asesor</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Eliminar asesor: confirmación doble (escribir ELIMINAR) -->
+    <div class="modal-overlay hidden" id="modalDeleteAsesor" role="dialog" aria-modal="true" aria-labelledby="modalDeleteAsesorTitle">
+      <div class="modal-panel modal-panel--narrow">
+        <div class="modal-head">
+          <h3 id="modalDeleteAsesorTitle">Eliminar perfil</h3>
+          <button type="button" class="btn btn-sm btn-ghost" id="btnCloseDeleteAsesor" aria-label="Cerrar">&times;</button>
+        </div>
+        <div class="modal-body-scroll modal-body--delete-asesor">
+          <p class="modal-delete-lead">
+            Va a eliminar el perfil de <strong id="deleteAsesorNombre"></strong>. Esta acción está pensada cuando la persona ya no forma parte del equipo.
+          </p>
+          <p class="modal-delete-step2">Segundo paso: escriba <strong>ELIMINAR</strong> para confirmar.</p>
+          <label class="modal-delete-label" for="deleteAsesorConfirmInput">Confirmación</label>
+          <input type="text" id="deleteAsesorConfirmInput" class="input-modal-delete" autocomplete="off" placeholder="Escriba ELIMINAR" />
+          <div class="modal-actions">
+            <button type="button" class="btn btn-ghost" id="btnDeleteAsesorCancel">Cancelar</button>
+            <button type="button" class="btn btn-danger-solid" id="btnDeleteAsesorConfirm" disabled>Eliminar definitivamente</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="toast" id="appToast" role="status" aria-live="polite" hidden></div>
+  </main>
+
+  <script src="js/api.js?v=20260409a"></script>
+  <script src="js/charts.js?v=20260402c"></script>
+  <script src="js/dashboard.js?v=20260409d"></script>
+</body>
+</html>
