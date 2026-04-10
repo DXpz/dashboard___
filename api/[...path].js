@@ -27,8 +27,9 @@ export default async function handler(req, res) {
   // Cabeceras al upstream
   const upstreamHeaders = {};
   upstreamHeaders['ngrok-skip-browser-warning'] = 'true';
-  const apiKey = req.headers['x-api-key'];
-  if (apiKey) upstreamHeaders['X-API-Key'] = Array.isArray(apiKey) ? apiKey[0] : apiKey;
+  // La clave se inyecta desde la variable de entorno del servidor (nunca se expone al browser)
+  const serverKey = (process.env.API_KEY ?? '').trim();
+  if (serverKey) upstreamHeaders['X-API-Key'] = serverKey;
   const contentType = req.headers['content-type'];
   if (contentType) upstreamHeaders['Content-Type'] = Array.isArray(contentType) ? contentType[0] : contentType;
   const accept = req.headers['accept'];

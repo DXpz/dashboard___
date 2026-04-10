@@ -14,8 +14,12 @@ const API = (() => {
    *   localStorage.setItem('dashboard_api_base', 'http://200.35.189.139')
    */
   const DEFAULT_BASE = '';
-  /** Única clave usada en todas las peticiones (`X-API-Key`). No se lee desde localStorage. */
-  const API_KEY = 'RedApi_2026_SuperSegura_9XK2';
+  /**
+   * Clave de API. En Vercel la clave la inyecta el proxy serverless (process.env.API_KEY),
+   * por lo que aquí puede quedar vacía. En local con base HTTP directa, ponla en localStorage:
+   *   localStorage.setItem('dashboard_api_key', 'tu-clave')
+   */
+  const API_KEY = localStorage.getItem('dashboard_api_key') ?? '';
 
   let _cache = null;
   let _cacheKey = '';
