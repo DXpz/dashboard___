@@ -2,6 +2,9 @@
   "name": "dashboard-leads",
   "private": true,
   "version": "1.0.0",
+  "scripts": {
+    "build": "mkdir -p dist && cp -r css js dist/ && cp index.html logo.png dist/"
+  },
   "engines": {
     "node": ">=18"
   }
