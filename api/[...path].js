@@ -48,6 +48,9 @@ export default async function handler(req, res) {
     const upstream = await fetch(target, { method, headers: upstreamHeaders, body });
     const outType = upstream.headers.get('content-type');
     if (outType) res.setHeader('Content-Type', outType);
+    // Evitar que Vercel o el browser cacheen respuestas de la API
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
     const buffer = Buffer.from(await upstream.arrayBuffer());
     res.status(upstream.status).send(buffer);
   } catch (err) {
