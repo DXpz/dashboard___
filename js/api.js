@@ -8,7 +8,12 @@ const API = (() => {
    * Base por defecto (doc. API LEADS). El servidor puede usar otro `PORT` en `.env` (p. ej. 3002).
    * Sustituir: `localStorage.setItem('dashboard_api_base', 'http://host:puerto')` o `API.setBase(...)`.
    */
-  const DEFAULT_BASE = 'http://200.35.189.139';
+  /**
+   * En Vercel (HTTPS) se deja vacío para usar rutas relativas `/api/...` que pasan por el
+   * proxy serverless (evita mixed content). En local se puede sobreescribir con localStorage:
+   *   localStorage.setItem('dashboard_api_base', 'http://200.35.189.139')
+   */
+  const DEFAULT_BASE = '';
   /** Única clave usada en todas las peticiones (`X-API-Key`). No se lee desde localStorage. */
   const API_KEY = 'RedApi_2026_SuperSegura_9XK2';
 
@@ -24,7 +29,8 @@ const API = (() => {
   }
 
   function isConfigured() {
-    return !!getBase();
+    const b = getBase();
+    return b === '' || b.startsWith('http');
   }
 
   function setBase(url) {
