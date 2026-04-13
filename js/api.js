@@ -15,8 +15,21 @@ const API = (() => {
   let _cache = null;
   let _cacheKey = '';
 
+  /**
+   * En HTTPS (p. ej. Vercel) las peticiones van al mismo origen para usar el proxy `/api/*`.
+   * Llamar directo a `http://IP` desde HTTPS provoca mixed content o timeouts.
+   */
+  function resolveDefaultBase() {
+    if (typeof window !== 'undefined' && window.location?.protocol === 'https:') {
+      return window.location.origin || DEFAULT_BASE;
+    }
+    return DEFAULT_BASE;
+  }
+
   function getBase() {
-    return (localStorage.getItem(STORAGE_KEY) || DEFAULT_BASE).replace(/\/+$/, '') || '';
+    const stored = localStorage.getItem(STORAGE_KEY);
+    const raw = stored && String(stored).trim() !== '' ? String(stored).trim() : resolveDefaultBase();
+    return raw.replace(/\/+$/, '') || '';
   }
 
   function getApiKey() {

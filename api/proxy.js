@@ -20,7 +20,12 @@ export default async function handler(req, res) {
 
   const upstreamHeaders = {};
   const serverKey = (process.env.API_KEY ?? '').trim();
-  if (serverKey) upstreamHeaders['X-API-Key'] = serverKey;
+  const clientKey = req.headers['x-api-key'];
+  const key =
+    serverKey ||
+    (typeof clientKey === 'string' ? clientKey.trim() : Array.isArray(clientKey) ? clientKey[0] : '') ||
+    '';
+  if (key) upstreamHeaders['X-API-Key'] = key;
 
   const forwarded = ['content-type', 'accept', 'authorization'];
   for (const h of forwarded) {
