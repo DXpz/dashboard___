@@ -503,7 +503,8 @@ body {
 }
 
 /* Misma apariencia que los inputs de fecha de la barra (filter-group + label) */
-.topbar .date-filters .filter-asesor-wrap select {
+.topbar .date-filters .filter-asesor-wrap select,
+.topbar .date-filters .filter-pais-wrap select {
   background-color: #ffffff;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none'%3E%3Cpath d='M1 1.5L6 6.5L11 1.5' stroke='%23475569' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
@@ -529,16 +530,19 @@ body {
   -webkit-appearance: none;
 }
 
-.topbar .date-filters .filter-asesor-wrap select:hover {
+.topbar .date-filters .filter-asesor-wrap select:hover,
+.topbar .date-filters .filter-pais-wrap select:hover {
   border-color: var(--brand-blue);
 }
 
-.topbar .date-filters .filter-asesor-wrap select:focus {
+.topbar .date-filters .filter-asesor-wrap select:focus,
+.topbar .date-filters .filter-pais-wrap select:focus {
   border-color: var(--brand-blue);
   box-shadow: 0 0 0 3px rgba(16, 122, 180, 0.18);
 }
 
-.topbar .date-filters .filter-asesor-wrap select option {
+.topbar .date-filters .filter-asesor-wrap select option,
+.topbar .date-filters .filter-pais-wrap select option {
   font-weight: 500;
   color: var(--text-primary);
   background: #fff;
@@ -719,18 +723,6 @@ body.app-ready .logo-img {
 }
 
 /* ===== KPI CARDS ===== */
-.overview-kpi-scope {
-  margin: 0 0 14px;
-  font-size: 0.9rem;
-  font-weight: 600;
-  color: var(--brand-dark, #145478);
-  line-height: 1.35;
-}
-.overview-kpi-scope.overview-kpi-scope--warn {
-  color: var(--accent-orange, #e67e22);
-  font-weight: 500;
-}
-
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -1381,7 +1373,7 @@ canvas {
 
 /* ===== Gestión de asesores (activar / desactivar / eliminar) ===== */
 .gestion-pais-filter {
-  width: 7.5rem;
+  width: 11rem;
   min-width: 0;
   max-width: 100%;
   font-size: 0.78rem;
@@ -1389,6 +1381,10 @@ canvas {
   background: rgba(255, 255, 255, 0.95);
   border-color: rgba(255, 255, 255, 0.45);
   color: var(--text-primary);
+  cursor: pointer;
+  border-radius: var(--radius-field);
+  border-style: solid;
+  border-width: 1px;
 }
 
 .gestion-pais-filter::placeholder {
@@ -1523,13 +1519,33 @@ canvas {
   min-height: 0;
 }
 
+.gestion-asesor-card__toprow {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
 .gestion-asesor-card__name {
   margin: 0;
+  flex: 1;
+  min-width: 0;
   font-size: 1rem;
   font-weight: 700;
   color: var(--brand-dark);
   line-height: 1.3;
   word-break: break-word;
+}
+
+/* Siglas SV/GT esquina superior derecha de la tarjeta (fila del título) */
+.gestion-asesor-card__code {
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  line-height: 1.3;
+  text-align: right;
 }
 
 .gestion-asesor-card__meta {
@@ -1733,6 +1749,11 @@ canvas {
   font-family: inherit;
   outline: none;
   transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+select.input-modal-field {
+  cursor: pointer;
+  padding-right: 28px;
 }
 
 .input-modal-field:focus {

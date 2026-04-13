@@ -3,6 +3,11 @@ chcp 65001 >nul
 cd /d "%~dp0"
 set PORT=8765
 
+REM Si quedo un python.exe colgado en este puerto, el navegador recibe "respuesta vacia". Liberar solo LISTEN.
+echo Liberando el puerto %PORT% si un intento anterior dejo el servidor a medias...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }"2>nul
+timeout /t 1 /nobreak >nul
+
 set PY=
 where python >nul 2>&1 && set PY=python
 if not defined PY where py >nul 2>&1 && set PY=py -3

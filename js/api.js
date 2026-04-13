@@ -52,6 +52,21 @@ const API = (() => {
     return str ? `?${str}` : '';
   }
 
+  /** Código de país para query `pais` (doc. API LEADS). Vacío → no se envía. */
+  function normPaisQuery(p) {
+    if (p == null || String(p).trim() === '') return '';
+    return String(p).trim().toUpperCase();
+  }
+
+  function paisParam(p) {
+    const code = normPaisQuery(p);
+    return code ? { pais: code } : {};
+  }
+
+  function nombreParam(nombre) {
+    return nombre && String(nombre).trim() ? { nombre: String(nombre).trim() } : {};
+  }
+
   const FETCH_TIMEOUT_MS = 25000;
 
   async function fetchWithTimeout(url, init = {}, ms = FETCH_TIMEOUT_MS) {
@@ -135,7 +150,8 @@ const API = (() => {
       const group_by_asesores = opts.group_by_asesores ?? 'asesor';
       const group_by_propuestas = opts.group_by_propuestas ?? 'rubro';
       const nombre = opts.nombre && String(opts.nombre).trim() ? String(opts.nombre).trim() : '';
-      const key = `${getBase()}|${getApiKey()}|${desde || ''}|${hasta || ''}|${limite_motivos}|${limite_reuniones_muestra}|${group_by_asesores}|${group_by_propuestas}|${nombre}`;
+      const paisCode = normPaisQuery(opts.pais);
+      const key = `${getBase()}|${getApiKey()}|${desde || ''}|${hasta || ''}|${limite_motivos}|${limite_reuniones_muestra}|${group_by_asesores}|${group_by_propuestas}|${nombre}|${paisCode}`;
       if (_cache && _cacheKey === key) return _cache;
       const data = await get('/dashboard', {
         desde,
@@ -144,59 +160,67 @@ const API = (() => {
         limite_reuniones_muestra,
         group_by_asesores,
         group_by_propuestas,
-        ...(nombre ? { nombre } : {})
+        ...nombreParam(nombre),
+        ...paisParam(paisCode)
       });
       _cache = data;
       _cacheKey = key;
       return data;
     },
 
-    resumen(desde, hasta, nombre) {
-      return get('/resumen', { desde, hasta, ...(nombre ? { nombre: String(nombre).trim() } : {}) });
+    resumen(desde, hasta, nombre, pais) {
+      return get('/resumen', { desde, hasta, ...nombreParam(nombre), ...paisParam(pais) });
     },
-    asesores(desde, hasta, group_by = 'asesor', nombre) {
+    asesores(desde, hasta, group_by = 'asesor', nombre, pais) {
       return get('/asesores', {
         desde,
         hasta,
         group_by,
-        ...(nombre ? { nombre: String(nombre).trim() } : {})
+        ...nombreParam(nombre),
+        ...paisParam(pais)
       });
     },
-    asesor(nombre, desde, hasta) { return get('/asesor', { nombre, desde, hasta }); },
-    propuestasPorRubro(desde, hasta, group_by = 'rubro', nombre) {
+    asesor(nombre, desde, hasta, pais) {
+      return get('/asesor', { nombre, desde, hasta, ...paisParam(pais) });
+    },
+    propuestasPorRubro(desde, hasta, group_by = 'rubro', nombre, pais) {
       return get('/propuestas-por-rubro', {
         desde,
         hasta,
         group_by,
-        ...(nombre ? { nombre: String(nombre).trim() } : {})
+        ...nombreParam(nombre),
+        ...paisParam(pais)
       });
     },
-    negociacion(desde, hasta, nombre) {
-      return get('/negociacion', { desde, hasta, ...(nombre ? { nombre: String(nombre).trim() } : {}) });
+    negociacion(desde, hasta, nombre, pais) {
+      return get('/negociacion', { desde, hasta, ...nombreParam(nombre), ...paisParam(pais) });
     },
-    motivosPerdida(desde, hasta, limite = 50, nombre) {
+    motivosPerdida(desde, hasta, limite = 50, nombre, pais) {
       return get('/motivos-perdida', {
         desde,
         hasta,
         limite,
-        ...(nombre ? { nombre: String(nombre).trim() } : {})
+        ...nombreParam(nombre),
+        ...paisParam(pais)
       });
     },
-    motivosPerdidaAgrupados(desde, hasta, nombre) {
+    motivosPerdidaAgrupados(desde, hasta, nombre, pais) {
       return get('/motivos-perdida/agrupados', {
         desde,
         hasta,
-        ...(nombre ? { nombre: String(nombre).trim() } : {})
+        ...nombreParam(nombre),
+        ...paisParam(pais)
       });
     },
     reuniones(desde, hasta, limite = 200, offset = 0, extra = {}) {
       return get('/reuniones', { desde, hasta, limite, offset, ...extra });
     },
-    listaAsesores(desde, hasta, nombre) {
+    listaAsesores(desde, hasta, nombre, pais) {
       return get('/lista-asesores', {
         desde,
         hasta,
-        ...(nombre ? { nombre: String(nombre).trim() } : {})
+        ...nombreParam(nombre),
+        ...paisParam(pais)
       });
     },
 
@@ -225,7 +249,7 @@ const API = (() => {
       }
       if (o && typeof o === 'object') {
         if (o.activo === true || o.activo === false) params.activo = o.activo;
-        if (o.pais != null && String(o.pais).trim() !== '') params.pais = String(o.pais).trim();
+               if (o.pais != null && String(o.pais).trim() !== '') params.pais = normPaisQuery(o.pais);
       }
       return getJsonPath(`/api/advisors${buildQuery(params)}`);
     },

@@ -147,6 +147,22 @@
     return ($('#filterAsesor')?.value ?? '').trim() || undefined;
   }
 
+  /** Código país ISO-2 para query `pais` en métricas (vacío = todos). */
+  function getPaisFilter() {
+    const v = ($('#filterPais')?.value ?? '').trim();
+    return v ? v.toUpperCase() : undefined;
+  }
+
+  function getPaisQuery() {
+    const p = getPaisFilter();
+    return p ? { pais: p } : {};
+  }
+
+  function getAsesoresGroupBy() {
+    const v = ($('#asesoresGroupBySelect')?.value ?? '').trim();
+    return v === 'country' ? 'country' : 'asesor';
+  }
+
   function updateAgentFilterVisibility() {
     $('#filterAsesorWrap')?.classList.toggle('hidden', currentSection === 'origen-leads');
   }
@@ -195,13 +211,49 @@
     ).trim();
   }
 
+  /** Solo El Salvador y Guatemala: métricas y altas de asesor usan estos códigos ISO-2. */
+  const METRICAS_PAISES = [
+    { code: 'SV', label: 'El Salvador' },
+    { code: 'GT', label: 'Guatemala' }
+  ];
+
+  function allowedPaisCodes() {
+    return METRICAS_PAISES.map((x) => x.code);
+  }
+
+  function normPaisChoice(v) {
+    const s = String(v ?? '')
+      .trim()
+      .toUpperCase();
+    if (!s) return '';
+    return allowedPaisCodes().includes(s) ? s : '';
+  }
+
+  /** Normaliza respuesta API (ISO-2 o texto) a código SV/GT cuando aplique. */
+  function normalizeAdvisorPaisCode(raw) {
+    if (raw == null || String(raw).trim() === '') return '';
+    const s = String(raw).trim().toUpperCase();
+    if (allowedPaisCodes().includes(s)) return s;
+    if (s.length >= 2 && allowedPaisCodes().includes(s.slice(0, 2))) return s.slice(0, 2);
+    if (/SALVADOR/.test(s)) return 'SV';
+    if (/GUATEMALA/.test(s)) return 'GT';
+    return '';
+  }
+
+  function pickAdvisorPaisField(x) {
+    if (!x || typeof x !== 'object') return '';
+    return x.pais ?? x.country ?? x.pais_vendedor ?? x.pais_asesor ?? x.country_code ?? '';
+  }
+
   function mapListaAsesorRow(x) {
     if (!x || typeof x !== 'object') return null;
     const nombre = pickAdvisorDisplayName(x);
     if (!nombre || normName(nombre) === '(sin asesor)') return null;
+    const paisCode = normalizeAdvisorPaisCode(pickAdvisorPaisField(x));
     return {
       nombre,
-      count: num(x.count ?? x.total ?? x.cantidad ?? x.registros ?? x.reuniones ?? 0)
+      count: num(x.count ?? x.total ?? x.cantidad ?? x.registros ?? x.reuniones ?? 0),
+      ...(paisCode ? { pais: paisCode } : {})
     };
   }
 
@@ -233,6 +285,27 @@
     return out;
   }
 
+  /** Desplegable del filtro global de país (solo SV / GT + opción ambos). */
+  async function refreshPaisFilterOptions(preserveSelection = true) {
+    const sel = $('#filterPais');
+    if (!sel) return;
+    const prevRaw = preserveSelection ? String(sel.value ?? '').trim().toUpperCase() : '';
+    const codes = allowedPaisCodes();
+    const prevOk = prevRaw === '' || codes.includes(prevRaw);
+    sel.innerHTML = '';
+    const opt0 = document.createElement('option');
+    opt0.value = '';
+    opt0.textContent = 'Todos';
+    sel.appendChild(opt0);
+    for (const { code, label } of METRICAS_PAISES) {
+      const o = document.createElement('option');
+      o.value = code;
+      o.textContent = `${label} (${code})`;
+      sel.appendChild(o);
+    }
+    sel.value = prevOk ? prevRaw : '';
+  }
+
   /** Rellena el desplegable de asesores combinando catálogo, lista por fechas y bundle del dashboard. */
   async function refreshAgentFilterOptions(preserveSelection = true) {
     const sel = $('#filterAsesor');
@@ -240,6 +313,8 @@
     const prev = preserveSelection ? sel.value : '';
     const f = getFilters();
     const nameSet = new Set();
+    const paisQ = getPaisFilter();
+    const advisorsOpts = paisQ ? { pais: paisQ } : {};
 
     const add = (arr) => {
       for (const v of arr) {
@@ -251,7 +326,7 @@
 
     /* 1) Catálogo de asesores: suele traer todos los nombres aunque lista-asesores venga distinto o vacío */
     try {
-      const raw = await API.advisorsList({});
+      const raw = await API.advisorsList(advisorsOpts);
       const items = Array.isArray(raw) ? raw : (raw.advisors ?? raw.items ?? raw.data ?? []);
       if (Array.isArray(items)) add(items.map((x) => pickAdvisorDisplayName(x)));
     } catch (e) {
@@ -260,7 +335,7 @@
 
     /* 2) lista-asesores en el rango de fechas (si hay fechas; si no, igual se pide sin params) */
     try {
-      const raw = await API.listaAsesores(f.desde, f.hasta);
+      const raw = await API.listaAsesores(f.desde, f.hasta, undefined, paisQ);
       add(normalizeListaAsesores(raw).map((x) => x.nombre));
     } catch (e) {
       console.warn('[filterAsesor] lista-asesores:', e?.message || e);
@@ -574,9 +649,10 @@
   $('#btnFiltrar').addEventListener('click', () => {
     API.invalidateCache();
     dashboardData = null;
-    refreshAgentFilterOptions(true)
-      .catch(() => {})
-      .finally(() => loadSectionData(currentSection));
+    Promise.all([
+      refreshPaisFilterOptions(true).catch(() => {}),
+      refreshAgentFilterOptions(true).catch(() => {})
+    ]).finally(() => loadSectionData(currentSection));
   });
 
   $('#btnLimpiar').addEventListener('click', () => {
@@ -584,15 +660,27 @@
     $('#hasta').value = '';
     const fs = $('#filterAsesor');
     if (fs) fs.value = '';
+    const fp = $('#filterPais');
+    if (fp) fp.value = '';
     API.invalidateCache();
     dashboardData = null;
-    refreshAgentFilterOptions(false)
-      .catch(() => {})
-      .finally(() => loadSectionData(currentSection));
+    Promise.all([
+      refreshPaisFilterOptions(false).catch(() => {}),
+      refreshAgentFilterOptions(false).catch(() => {})
+    ]).finally(() => loadSectionData(currentSection));
   });
 
   $('#filterAsesor')?.addEventListener('change', () => {
     loadSectionData(currentSection);
+  });
+
+  $('#filterPais')?.addEventListener('change', () => {
+    dashboardData = null;
+    API.invalidateCache();
+    Promise.all([
+      refreshPaisFilterOptions(true).catch(() => {}),
+      refreshAgentFilterOptions(true).catch(() => {})
+    ]).finally(() => loadSectionData(currentSection));
   });
 
   // ─── Fetch dashboard bundle ───
@@ -600,7 +688,10 @@
   async function ensureDashboardData() {
     if (dashboardData) return dashboardData;
     const f = getFilters();
-    dashboardData = await API.dashboard(f.desde, f.hasta, 30, 40, DASHBOARD_QUERY);
+    dashboardData = await API.dashboard(f.desde, f.hasta, 30, 40, {
+      ...DASHBOARD_QUERY,
+      pais: getPaisFilter()
+    });
     return dashboardData;
   }
 
@@ -715,7 +806,7 @@
     let offset = 0;
     const all = [];
     for (;;) {
-      const data = await API.reuniones(desde, hasta, LIMIT, offset);
+      const data = await API.reuniones(desde, hasta, LIMIT, offset, getPaisQuery());
       const list = Array.isArray(data) ? data : (data.reuniones || data.items || []);
       if (!list.length) break;
       all.push(...list);
@@ -796,7 +887,7 @@
 
     let apiParsed = null;
     try {
-      const raw = await API.fuentes(f.desde, f.hasta);
+      const raw = await API.fuentes(f.desde, f.hasta, getPaisQuery());
       apiParsed = parseFuentesMetrics(raw);
     } catch (e) {
       console.warn('Métricas de fuentes:', e.message || e);
@@ -891,7 +982,7 @@
     let rows = [];
 
     try {
-      const paisF = ($('#gestionFilterPais')?.value ?? '').trim();
+      const paisF = normPaisChoice($('#gestionFilterPais')?.value ?? '');
       const g = await API.advisorsList(paisF ? { pais: paisF } : {});
       const items = Array.isArray(g) ? g : (g.advisors ?? g.items ?? g.data ?? []);
       if (Array.isArray(items) && items.length) {
@@ -917,9 +1008,11 @@
                 ? `id:${String(id)}`
                 : `n:${normName(nombre)}`;
             if (state.activo[sk] !== undefined) activo = !!state.activo[sk];
+            const paisCode = normalizeAdvisorPaisCode(pickAdvisorPaisField(x));
             return {
               id,
               nombre,
+              pais: paisCode || undefined,
               activo,
               _count: num(x.count ?? x.total ?? x.registros),
               _fromServer: true
@@ -942,7 +1035,7 @@
       const f = getFilters();
       let raw;
       try {
-        raw = await API.listaAsesores(f.desde, f.hasta);
+        raw = await API.listaAsesores(f.desde, f.hasta, undefined, getPaisFilter());
       } catch (e) {
         console.warn('lista-asesores:', e.message || e);
         raw = [];
@@ -956,6 +1049,7 @@
           return {
             id: `local:${encodeURIComponent(x.nombre)}`,
             nombre: x.nombre,
+            pais: x.pais || undefined,
             activo,
             _count: x.count,
             _fromServer: false
@@ -984,11 +1078,19 @@
           row._count != null
             ? `<span class="gestion-asesor-card__meta">Registros en período: <strong>${fmt(row._count)}</strong></span>`
             : '';
+        const code = row.pais ? String(row.pais).trim().toUpperCase().slice(0, 2) : '';
+        const showCode = code && allowedPaisCodes().includes(code);
+        const codeHtml = showCode
+          ? `<span class="gestion-asesor-card__code" aria-label="País">${escapeHtml(code)}</span>`
+          : '';
         const onAct = row.activo ? ' btn-gestion-selected' : '';
         const onInact = !row.activo ? ' btn-gestion-selected-inactive' : '';
         return `<article class="gestion-asesor-card" data-idx="${idx}">
         <div class="gestion-asesor-card__head">
-          <h4 class="gestion-asesor-card__name">${escapeHtml(row.nombre)}</h4>
+          <div class="gestion-asesor-card__toprow">
+            <h4 class="gestion-asesor-card__name">${escapeHtml(row.nombre)}</h4>
+            ${codeHtml}
+          </div>
           ${meta}
         </div>
         <div class="gestion-asesor-card__status">${badge}</div>
@@ -1082,7 +1184,7 @@
     const paisEl = $('#nuevoAsesorPais');
     const nombre = (nombreEl?.value ?? '').trim();
     const correo = (correoEl?.value ?? '').trim();
-    const pais = (paisEl?.value ?? '').trim();
+    const pais = normPaisChoice(paisEl?.value ?? '');
     if (!nombre) {
       showToast('Indique el nombre del asesor.', true);
       nombreEl?.focus();
@@ -1094,7 +1196,7 @@
       return;
     }
     if (!pais) {
-      showToast('Indique el país.', true);
+      showToast('Seleccione El Salvador o Guatemala.', true);
       paisEl?.focus();
       return;
     }
@@ -1198,10 +1300,12 @@
           try {
             const f = getFilters();
             const ag = getAgentNombre();
+            const gb = getAsesoresGroupBy();
+            const paisF = getPaisFilter();
             let list = [];
             if (ag) {
               try {
-                const raw = await API.asesor(ag, f.desde, f.hasta);
+                const raw = await API.asesor(ag, f.desde, f.hasta, paisF);
                 list = normalizeAsesoresRows(raw);
               } catch (_) {}
               if (!list.length) {
@@ -1216,10 +1320,10 @@
               }
             } else {
               try {
-                const raw = await API.asesores(f.desde, f.hasta, DASHBOARD_QUERY.group_by_asesores);
+                const raw = await API.asesores(f.desde, f.hasta, gb, undefined, paisF);
                 list = normalizeAsesoresRows(raw);
               } catch (_) {}
-              if (!list.length) list = normalizeAsesoresRows(data.asesores);
+              if (!list.length && gb === 'asesor') list = normalizeAsesoresRows(data.asesores);
             }
             if (list.length) merged = { ...data, asesores: list };
           } catch (e) {
@@ -1254,21 +1358,24 @@
   async function loadPropuestasFromApi() {
     const f = getFilters();
     const ag = getAgentNombre();
-    const dashOpts = { ...DASHBOARD_QUERY };
+    const paisF = getPaisFilter();
+    const dashOpts = { ...DASHBOARD_QUERY, pais: paisF };
 
     if (ag) {
       let rubrosRaw;
       let motivosRaw = [];
       let motivosAgrupadosRaw = {};
       try {
-        const raw = await API.asesor(ag, f.desde, f.hasta);
+        const raw = await API.asesor(ag, f.desde, f.hasta, paisF);
         rubrosRaw = raw.propuestas_por_rubro ?? raw.propuestasPorRubro ?? raw.data?.propuestas_por_rubro;
         motivosRaw = raw.motivos_perdida ?? raw.motivosPerdida ?? [];
       } catch (e) {
         console.warn('Propuestas (asesor):', e.message || e);
       }
       try {
-        motivosAgrupadosRaw = await API.motivosPerdidaAgrupados(f.desde, f.hasta, ag).catch(() => ({}));
+        motivosAgrupadosRaw = await API.motivosPerdidaAgrupados(f.desde, f.hasta, ag, paisF).catch(
+          () => ({})
+        );
       } catch (_) {}
       let rows = normalizePropuestasPorRubro(rubrosRaw || []).map(mapRubroApi);
       if (!rows.length) {
@@ -1305,9 +1412,9 @@
     let motivosAgrupadosRaw = {};
     try {
       [rubrosRaw, motivosRaw, motivosAgrupadosRaw] = await Promise.all([
-        API.propuestasPorRubro(f.desde, f.hasta, 'rubro'),
-        API.motivosPerdida(f.desde, f.hasta, 50),
-        API.motivosPerdidaAgrupados(f.desde, f.hasta).catch(() => ({}))
+        API.propuestasPorRubro(f.desde, f.hasta, 'rubro', undefined, paisF),
+        API.motivosPerdida(f.desde, f.hasta, 50, undefined, paisF),
+        API.motivosPerdidaAgrupados(f.desde, f.hasta, undefined, paisF).catch(() => ({}))
       ]);
     } catch (err) {
       console.warn('Propuestas (consulta dedicada):', err.message || err);
@@ -1343,12 +1450,13 @@
   async function loadNegociacionFromApi() {
     const f = getFilters();
     const ag = getAgentNombre();
-    const dashOpts = { ...DASHBOARD_QUERY };
+    const paisF = getPaisFilter();
+    const dashOpts = { ...DASHBOARD_QUERY, pais: paisF };
 
     if (ag) {
       let raw = {};
       try {
-        const one = await API.asesor(ag, f.desde, f.hasta);
+        const one = await API.asesor(ag, f.desde, f.hasta, paisF);
         raw = one.negociacion ?? one.data?.negociacion ?? one;
       } catch (e) {
         console.warn('Negociación (asesor):', e.message || e);
@@ -1378,7 +1486,7 @@
 
     let raw;
     try {
-      raw = await API.negociacion(f.desde, f.hasta);
+      raw = await API.negociacion(f.desde, f.hasta, undefined, paisF);
     } catch (err) {
       console.warn('Negociación (consulta dedicada):', err.message || err);
       try {
@@ -1604,7 +1712,7 @@
     if (!row) {
       try {
         const f = getFilters();
-        const raw = await API.asesor(ag, f.desde, f.hasta);
+        const raw = await API.asesor(ag, f.desde, f.hasta, getPaisFilter());
         const rows = normalizeAsesoresRows(raw);
         row = findMatchingAsesorRow(rows, ag) ?? (rows.length === 1 ? rows[0] : null);
       } catch (_) {}
@@ -1685,21 +1793,6 @@
   //  OVERVIEW  (data.resumen)
   // ═══════════════════════════════════════════════
   function renderOverview(data) {
-    const ag = getAgentNombre();
-    const scope = $('#overviewKpiScope');
-    if (scope) {
-      if (ag) {
-        const matched = data && data._overviewAsesorMatched === true;
-        scope.textContent = matched
-          ? `Estas tarjetas muestran métricas solo del asesor: ${ag}`
-          : `Asesor «${ag}» seleccionado: no hay fila de métricas por asesor en los datos; las cifras son totales globales.`;
-        scope.classList.toggle('overview-kpi-scope--warn', !matched);
-      } else {
-        scope.textContent = 'Métricas consolidadas de todos los asesores.';
-        scope.classList.remove('overview-kpi-scope--warn');
-      }
-    }
-
     const r = normalizeResumen(data);
 
     $('#kpi-auditorias').textContent = fmt(r.total_auditorias);
@@ -1750,18 +1843,39 @@
   let asesoresData = [];
 
   function asesorRowLabel(a) {
-    return (a.nombre || a.advisor_name || a.country || a.pais || '—').trim() || '—';
+    if (!a || typeof a !== 'object') return '—';
+    const name = String(a.nombre || a.advisor_name || '').trim();
+    const code = normalizeAdvisorPaisCode(a.pais ?? a.country);
+    if (name) {
+      if (code && !allowedPaisCodes().includes(name.toUpperCase())) return `${name} ${code}`;
+      return name;
+    }
+    const lone = String(a.country || a.pais || '').trim();
+    if (lone) return lone;
+    return '—';
   }
 
   function renderAsesores(data) {
     asesoresData = Array.isArray(data.asesores) ? data.asesores : [];
+    const th = document.querySelector('#tablaAsesores thead th[data-sort="nombre"]');
+    if (th) th.textContent = getAsesoresGroupBy() === 'country' ? 'País' : 'Asesor';
+    const ht = $('#asesoresChartTitle');
+    if (ht) {
+      ht.textContent =
+        getAsesoresGroupBy() === 'country' ? 'Rendimiento agregado por país' : 'Rendimiento por asesor';
+    }
     renderAsesoresChart('reuniones');
     renderAsesoresTable(asesoresData);
   }
 
   function renderAsesoresChart(metric) {
     const sorted = [...asesoresData]
-      .filter((a) => (a.nombre || a.advisor_name) !== '(sin asesor)')
+      .filter((a) => {
+        const lbl = String(asesorRowLabel(a)).toLowerCase();
+        if (!lbl || lbl === '—') return false;
+        if (lbl.includes('sin asesor') || lbl.includes('sin país')) return false;
+        return true;
+      })
       .sort((a, b) => (b[metric] || 0) - (a[metric] || 0))
       .slice(0, 20);
     Charts.barVertical('chartAsesoresBar',
@@ -1771,6 +1885,10 @@
   }
 
   $('#asesorMetricSelect')?.addEventListener('change', (e) => renderAsesoresChart(e.target.value));
+
+  $('#asesoresGroupBySelect')?.addEventListener('change', () => {
+    if (currentSection === 'asesores') loadSectionData('asesores');
+  });
 
   $('#selectOverviewTiempoRespGroup')?.addEventListener('change', () => {
     loadOverviewNuevasMetricas().catch((e) => console.warn(e));
@@ -1932,7 +2050,13 @@
   // ═══════════════════════════════════════════════
   async function loadReuniones() {
     const f = getFilters();
-    const data = await API.reuniones(f.desde, f.hasta, REUNIONES_LIMIT, reunionesPage * REUNIONES_LIMIT);
+    const data = await API.reuniones(
+      f.desde,
+      f.hasta,
+      REUNIONES_LIMIT,
+      reunionesPage * REUNIONES_LIMIT,
+      getPaisQuery()
+    );
     let list = Array.isArray(data) ? data : (data.reuniones || data.items || []);
     const ag = getAgentNombre();
     if (ag) list = list.filter((r) => reunionRowMatchesAsesor(r, ag));
@@ -2090,12 +2214,13 @@
     let nivelesRows = [];
     try {
       const agn = getAgentNombre();
+      const metricExtra = getPaisQuery();
       const [tr, ne] = await Promise.all([
-        API.tiempoRespuesta(f.desde, f.hasta, groupBy).catch((err) => {
+        API.tiempoRespuesta(f.desde, f.hasta, groupBy, metricExtra).catch((err) => {
           console.warn('[metrics] tiempo-respuesta HTTP/error:', err?.message || err);
           return {};
         }),
-        API.nivelesEscalacion(f.desde, f.hasta).catch((err) => {
+        API.nivelesEscalacion(f.desde, f.hasta, metricExtra).catch((err) => {
           console.warn('[metrics] niveles-escalacion HTTP/error:', err?.message || err);
           return {};
         })
@@ -2321,6 +2446,10 @@
     loadGestionAsesores().catch((err) => console.warn(err));
   });
 
+  $('#gestionFilterPais')?.addEventListener('change', () => {
+    loadGestionAsesores().catch((err) => console.warn(err));
+  });
+
   $('#btnGestionNuevoAsesor')?.addEventListener('click', openNuevoAsesorModal);
   $('#btnCloseNuevoAsesor')?.addEventListener('click', closeNuevoAsesorModal);
   $('#btnNuevoAsesorCancel')?.addEventListener('click', closeNuevoAsesorModal);
@@ -2366,9 +2495,15 @@
     updateAgentFilterVisibility();
     try {
       try {
+        await refreshPaisFilterOptions(false);
+      } catch (_) {}
+      try {
         await refreshAgentFilterOptions(false);
       } catch (_) {}
       const data = await ensureDashboardData();
+      try {
+        await refreshPaisFilterOptions(true);
+      } catch (_) {}
       try {
         await refreshAgentFilterOptions(true);
       } catch (_) {}
