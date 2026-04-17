@@ -31,6 +31,9 @@
   };
   /** Valores por defecto para la consulta del resumen general */
   const DASHBOARD_QUERY = { group_by_asesores: 'asesor', group_by_propuestas: 'rubro' };
+  /** Refresco periódico del panel (ms). */
+  const AUTO_REFRESH_MS = 60000;
+  let autoRefreshTimer = null;
 
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => document.querySelectorAll(sel);
@@ -110,8 +113,10 @@
   }
 
   function setConnection(state, extra) {
+    if (!connStatus) return;
     connStatus.className = `connection-status ${state}`;
     const txt = connStatus.querySelector('.status-text');
+    if (!txt) return;
     const hint = $('#connectionHint');
     if (hint) {
       hint.classList.add('hidden');
@@ -156,6 +161,27 @@
   function getPaisQuery() {
     const p = getPaisFilter();
     return p ? { pais: p } : {};
+  }
+
+  /** Filtros activos visibles bajo el título. */
+  function updateActiveFiltersSummary() {
+    const el = $('#activeFiltersSummary');
+    if (!el) return;
+    const f = getFilters();
+    const parts = [];
+    if (f.desde) parts.push(`Desde: ${String(f.desde).slice(0, 10)}`);
+    if (f.hasta) parts.push(`Hasta: ${String(f.hasta).slice(0, 10)}`);
+    const p = getPaisFilter();
+    if (p) parts.push(`País: ${p}`);
+    const ag = getAgentNombre();
+    if (ag) parts.push(`Asesor: ${ag}`);
+    if (!parts.length) {
+      el.textContent = '';
+      el.classList.add('hidden');
+      return;
+    }
+    el.textContent = parts.join(' · ');
+    el.classList.remove('hidden');
   }
 
   function getAsesoresGroupBy() {
@@ -206,9 +232,34 @@
 
   function pickAdvisorDisplayName(x) {
     if (!x || typeof x !== 'object') return '';
-    return String(
-      x.nombre_vendedor ?? x.advisor_name ?? x.nombre ?? x.name ?? x.vendedor ?? x.label ?? ''
-    ).trim();
+    const adv = x.advisor;
+    let advStr = '';
+    if (typeof adv === 'string') advStr = adv.trim();
+    else if (adv && typeof adv === 'object') {
+      advStr = String(
+        adv.nombre_vendedor ?? adv.nombre ?? adv.name ?? adv.advisor_name ?? adv.label ?? ''
+      ).trim();
+    }
+    const candidates = [
+      x.nombre_vendedor,
+      advStr,
+      x.advisor_name,
+      x.nombre_asesor,
+      x.asesor_nombre,
+      x.nombreAsesor,
+      x.asesor,
+      x.nombre,
+      x.name,
+      x.vendedor,
+      x.label,
+      x.grupo,
+      x.clave,
+      x.key
+    ];
+    for (const c of candidates) {
+      if (c != null && String(c).trim() !== '') return String(c).trim();
+    }
+    return '';
   }
 
   /** Solo El Salvador y Guatemala: métricas y altas de asesor usan estos códigos ISO-2. */
@@ -622,6 +673,7 @@
 
   function switchSection(section) {
     currentSection = section;
+    updateActiveFiltersSummary();
     updateAgentFilterVisibility();
     $$('.nav-item').forEach((n) => n.classList.toggle('active', n.dataset.section === section));
     $$('.section').forEach((s) => s.classList.toggle('hidden', s.id !== `section-${section}`));
@@ -649,6 +701,7 @@
   $('#btnFiltrar').addEventListener('click', () => {
     API.invalidateCache();
     dashboardData = null;
+    updateActiveFiltersSummary();
     Promise.all([
       refreshPaisFilterOptions(true).catch(() => {}),
       refreshAgentFilterOptions(true).catch(() => {})
@@ -664,6 +717,7 @@
     if (fp) fp.value = '';
     API.invalidateCache();
     dashboardData = null;
+    updateActiveFiltersSummary();
     Promise.all([
       refreshPaisFilterOptions(false).catch(() => {}),
       refreshAgentFilterOptions(false).catch(() => {})
@@ -671,35 +725,153 @@
   });
 
   $('#filterAsesor')?.addEventListener('change', () => {
+    dashboardData = null;
+    API.invalidateCache();
+    updateActiveFiltersSummary();
     loadSectionData(currentSection);
   });
 
   $('#filterPais')?.addEventListener('change', () => {
     dashboardData = null;
     API.invalidateCache();
+    updateActiveFiltersSummary();
     Promise.all([
       refreshPaisFilterOptions(true).catch(() => {}),
       refreshAgentFilterOptions(true).catch(() => {})
     ]).finally(() => loadSectionData(currentSection));
   });
 
+  $('#desde')?.addEventListener('change', updateActiveFiltersSummary);
+  $('#hasta')?.addEventListener('change', updateActiveFiltersSummary);
+
   // ─── Fetch dashboard bundle ───
   /** Siempre agregado global (sin filtro por nombre en URL) para poder rebanar por asesor en cliente. */
   async function ensureDashboardData() {
     if (dashboardData) return dashboardData;
     const f = getFilters();
+    const nombre = getAgentNombre();
     dashboardData = await API.dashboard(f.desde, f.hasta, 30, 40, {
       ...DASHBOARD_QUERY,
-      pais: getPaisFilter()
+      pais: getPaisFilter(),
+      ...(nombre ? { nombre } : {})
     });
     return dashboardData;
   }
 
-  /** Normaliza la respuesta de métricas por asesor → filas para la tabla */
+  /** Convierte mapas tipo `{ "Nombre": { reuniones: … } }` en filas. */
+  function asesoresObjectMapToRows(obj) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return [];
+    const skip = new Set(['ok', 'message', 'detail', 'meta', 'global', 'version', 'data']);
+    return Object.entries(obj)
+      .filter(([k]) => k && !skip.has(String(k).toLowerCase()))
+      .map(([k, v]) => {
+        if (v && typeof v === 'object' && !Array.isArray(v)) {
+          const label = k === '_empty_' || k === 'null' ? '(sin asesor)' : k;
+          const merged = { ...v };
+          const nm = String(
+            pickAdvisorDisplayName(merged) || merged.nombre || merged.advisor_name || label || ''
+          ).trim();
+          merged.nombre = nm || label;
+          merged.advisor_name = merged.advisor_name || merged.nombre_vendedor || merged.nombre;
+          return merged;
+        }
+        return { nombre: k, reuniones: num(v) };
+      })
+      .filter((r) => r && typeof r === 'object');
+  }
+
+  /**
+   * Métricas por asesor/país: el bundle y GET /asesores pueden devolver array, objeto anidado o mapa por nombre.
+   */
   function normalizeAsesoresRows(raw) {
-    if (Array.isArray(raw)) return raw;
-    if (!raw || typeof raw !== 'object') return [];
-    return raw.asesores || raw.items || raw.data || raw.rows || [];
+    if (raw == null) return [];
+    if (Array.isArray(raw)) return raw.filter((x) => x && typeof x === 'object' && !Array.isArray(x));
+    if (typeof raw !== 'object') return [];
+
+    const arrFrom = (x) =>
+      Array.isArray(x) ? x.filter((r) => r && typeof r === 'object' && !Array.isArray(r)) : null;
+
+    let list =
+      arrFrom(raw.asesores) ||
+      arrFrom(raw.items) ||
+      arrFrom(raw.rows) ||
+      arrFrom(raw.results) ||
+      arrFrom(raw.por_asesor) ||
+      arrFrom(raw.lista);
+
+    if (!list?.length && raw.data != null) {
+      if (Array.isArray(raw.data)) list = arrFrom(raw.data);
+      else if (typeof raw.data === 'object') {
+        list =
+          arrFrom(raw.data.asesores) ||
+          arrFrom(raw.data.items) ||
+          arrFrom(raw.data.rows) ||
+          arrFrom(raw.data.data);
+      }
+    }
+
+    if (!list?.length && raw.metrics && typeof raw.metrics === 'object') {
+      list = arrFrom(raw.metrics.asesores) || arrFrom(raw.metrics.rows);
+    }
+
+    if (!list?.length) {
+      const nested = raw.asesores ?? raw.por_pais ?? raw.porPais;
+      if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+        list = asesoresObjectMapToRows(nested);
+      }
+    }
+
+    return list || [];
+  }
+
+  /** Une `stats` y alias habituales del API a los campos que usa la tabla y los gráficos de asesores. */
+  function coerceAsesorMetricRow(row) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) return row;
+    const s = row.stats && typeof row.stats === 'object' ? { ...row, ...row.stats } : { ...row };
+    const id =
+      s.advisor_id ?? s.asesor_id ?? s.id ?? s.uuid ?? s.pk ?? (s.advisor && typeof s.advisor === 'object' ? s.advisor.id : null);
+    let resolvedNombre = String(
+      pickAdvisorDisplayName(s) ||
+        s.nombre ||
+        s.advisor_name ||
+        s.name ||
+        s.label ||
+        s.grupo ||
+        s.clave ||
+        s.key ||
+        ''
+    ).trim();
+    if (!resolvedNombre && (s.pais || s.country)) {
+      const pc = normalizeAdvisorPaisCode(s.pais ?? s.country);
+      if (pc) resolvedNombre = pc;
+    }
+    if (!resolvedNombre && id != null && String(id).trim() !== '') {
+      resolvedNombre = `Asesor ${String(id).slice(0, 12)}`;
+    }
+    return {
+      ...s,
+      reuniones: num(s.reuniones ?? s.total_reuniones ?? s.reuniones_total ?? s.meetings ?? s.count_reuniones),
+      aceptaciones: num(
+        s.aceptaciones ?? s.aceptados ?? s.leads_aceptados ?? s.tot_aceptados ?? s.accepted_leads
+      ),
+      rechazos: num(s.rechazos ?? s.rechazados ?? s.leads_rechazados ?? s.tot_rechazados ?? s.rejected_leads),
+      con_retro: num(s.con_retro ?? s.reuniones_con_retro ?? s.reunionesConRetro ?? s.con_retroalimentacion),
+      promedio_min_retro: num(
+        s.promedio_min_retro ?? s.promedio_minutos_retro ?? s.promedio_retro ?? s.avg_minutos_retro
+      ),
+      notiREU_promedio: num(
+        s.notiREU_promedio ?? s.notireu_promedio ?? s.media_notiREU ?? s.notiREU ?? s.noti_reu_promedio
+      ),
+      propuestas: num(
+        s.propuestas ?? s.propuestas_registradas ?? s.total_propuestas ?? s.n_propuestas ?? s.propuestas_count
+      ),
+      ventas_cerradas: num(s.ventas_cerradas ?? s.cerradas ?? s.ventasCerradas ?? s.closed_sales),
+      ventas_perdidas: num(s.ventas_perdidas ?? s.perdidas ?? s.ventasPerdidas ?? s.lost_sales),
+      pais: s.pais || normalizeAdvisorPaisCode(pickAdvisorPaisField(s)) || undefined,
+      country: s.country ?? s.pais,
+      nombre: resolvedNombre,
+      advisor_name: s.advisor_name ?? s.nombre_vendedor ?? resolvedNombre
+    };
   }
 
   function normalizeLeadSource(raw) {
@@ -712,6 +884,8 @@
     if (/insta|instagram|\big\b|^ig$/.test(s)) return 'instagram';
     if (/facebook|fb\b|meta/.test(s)) return 'facebook';
     if (/whatsapp|wa\b|wsp|^wp$/.test(s)) return 'whatsapp';
+    /* ElevenLabs u orígenes del widget web → misma categoría que página web */
+    if (/eleven\s*labs|elevenlabs|^11labs$|11labs/.test(s)) return 'web';
     if (/web|sitio|pagina|página|www|organic|google|seo|landing|browser/.test(s)) return 'web';
     return 'otro';
   }
@@ -763,21 +937,77 @@
     return startOfWeekMonday(x).toISOString().slice(0, 10);
   }
 
+  /** Lunes de la semana ISO 8601 (1 = primera semana del año que contiene el 4 de enero). */
+  function mondayFromIsoWeek(year, week) {
+    const y = Number(year);
+    const w = Number(week);
+    if (!Number.isFinite(y) || !Number.isFinite(w) || w < 1 || w > 53) return null;
+    const jan4 = new Date(y, 0, 4, 12, 0, 0, 0);
+    const dayOfWeek = jan4.getDay() || 7;
+    const mondayWeek1 = new Date(jan4);
+    mondayWeek1.setDate(jan4.getDate() - dayOfWeek + 1);
+    const out = new Date(mondayWeek1);
+    out.setDate(mondayWeek1.getDate() + (w - 1) * 7);
+    out.setHours(12, 0, 0, 0);
+    return Number.isNaN(out.getTime()) ? null : out;
+  }
+
+  /** Normaliza `dk` del API a clave estable (YYYY-MM-DD / YYYY-MM) para agrupar y etiquetar. */
+  function coerceFuentesPeriodKey(dk, agrup) {
+    if (dk == null) return null;
+    const s = String(dk).trim();
+    if (!s) return null;
+    const isoWeek = /^(\d{4})-W(\d{1,2})$/i.exec(s);
+    if (isoWeek) {
+      const mon = mondayFromIsoWeek(isoWeek[1], isoWeek[2]);
+      if (!mon) return null;
+      if (agrup === 'month') return mon.toISOString().slice(0, 7);
+      if (agrup === 'week') return mon.toISOString().slice(0, 10);
+      return mon.toISOString().slice(0, 10);
+    }
+    const t = new Date(s);
+    if (!Number.isNaN(t.getTime())) return periodKey(t, agrup);
+    const ymd = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+    if (ymd) {
+      const t2 = new Date(`${ymd[1]}-${ymd[2]}-${ymd[3]}T12:00:00`);
+      if (!Number.isNaN(t2.getTime())) return periodKey(t2, agrup);
+    }
+    if (agrup === 'month') {
+      const ym = /^(\d{4})-(\d{2})$/.exec(s);
+      if (ym) return `${ym[1]}-${ym[2]}`;
+    }
+    return s.length >= 10 ? s.slice(0, 10) : s;
+  }
+
   function formatPeriodLabel(key, agrup) {
-    if (key === '_all') return 'Todo el rango';
+    const k0 = String(key ?? '').trim();
+    if (key === '_all' || /^all$/i.test(k0) || /^total$/i.test(k0)) return 'Todo el rango';
+    const k = k0;
     if (agrup === 'day') {
-      const d = new Date(key + 'T12:00:00');
+      const d = new Date(k + (k.includes('T') ? '' : 'T12:00:00'));
+      if (Number.isNaN(d.getTime())) return k || '—';
       return d.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' });
     }
     if (agrup === 'month') {
-      const [y, m] = key.split('-');
+      const [y, m] = k.split('-');
       const d = new Date(Number(y), Number(m) - 1, 1);
+      if (Number.isNaN(d.getTime())) return k || '—';
       return d.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
     }
-    const d = new Date(key + 'T12:00:00');
+    const isoW = /^(\d{4})-W(\d{1,2})$/i.exec(k);
+    if (isoW) {
+      const mon = mondayFromIsoWeek(isoW[1], isoW[2]);
+      if (mon && !Number.isNaN(mon.getTime())) {
+        return (
+          'Sem. ' +
+          mon.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })
+        );
+      }
+    }
+    const d = new Date(k + (k.includes('T') ? '' : 'T12:00:00'));
+    if (Number.isNaN(d.getTime())) return k || '—';
     return (
-      'Sem. ' +
-      d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })
+      'Sem. ' + d.toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })
     );
   }
 
@@ -785,19 +1015,171 @@
     return ORIGEN_ORDER.reduce((s, k) => s + num(obj[k]), 0);
   }
 
-  /** Respuesta de métricas de fuentes: lista con fuente y número de auditorías. */
-  function parseFuentesMetrics(raw) {
-    if (!raw || typeof raw !== 'object') return null;
-    const list = raw.fuentes ?? raw.items;
-    if (!Array.isArray(list)) return null;
+  /** El API a veces agrupa todo el rango en un solo bucket (`all`, `total`, …). */
+  function isAggregatePeriodToken(dk) {
+    const t = String(dk ?? '')
+      .trim()
+      .toLowerCase();
+    if (!t) return false;
+    return ['all', '_all', 'total', 'none', '*', 'null', 'any', 'global', 'complete'].includes(t);
+  }
+
+  /**
+   * Respuesta de GET /metrics/fuentes: lista, serie temporal o totales por canal.
+   * `agrup`: day | week | month para filas con fecha.
+   * `opts.desde` / `opts.hasta` (ISO) sustituyen el token `all` en el eje temporal.
+   */
+  function parseFuentesMetrics(raw, agrup = 'week', opts = {}) {
+    if (raw == null) return null;
+    let list = null;
+    if (Array.isArray(raw)) {
+      list = raw;
+    } else if (typeof raw === 'object') {
+      const cand =
+        raw.fuentes ??
+        raw.items ??
+        raw.data ??
+        raw.series ??
+        raw.rows ??
+        raw.detalle ??
+        (raw.data && typeof raw.data === 'object' ? raw.data.fuentes ?? raw.data.items : null);
+      if (Array.isArray(cand)) list = cand;
+      else if (cand && typeof cand === 'object' && !Array.isArray(cand)) {
+        const inner = cand.fuentes ?? cand.items ?? cand.rows;
+        if (Array.isArray(inner)) list = inner;
+      }
+    }
+    if (!Array.isArray(list)) {
+      if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        const porOrigen = { instagram: 0, facebook: 0, web: 0, whatsapp: 0, otro: 0 };
+        let any = false;
+        for (const k of ORIGEN_ORDER) {
+          const v =
+            raw[k] ??
+            raw[`${k}_count`] ??
+            raw[`total_${k}`] ??
+            (raw.totales && typeof raw.totales === 'object' ? raw.totales[k] : null) ??
+            (raw.por_fuente && typeof raw.por_fuente === 'object' ? raw.por_fuente[k] : null);
+          if (v != null && v !== '') {
+            porOrigen[k] += num(v);
+            any = true;
+          }
+        }
+        const t = num(raw.total ?? raw.total_auditorias);
+        const sum = sumPorOrigen(porOrigen);
+        if (any && sum > 0) {
+          return {
+            total: t || sum,
+            porOrigen,
+            hasSeries: false,
+            rowsAnalyzed: t || sum
+          };
+        }
+        const mapSrc =
+          raw.por_fuente ??
+          raw.por_validator ??
+          raw.porValidator ??
+          raw.by_source ??
+          raw.bySource;
+        if (mapSrc && typeof mapSrc === 'object' && !Array.isArray(mapSrc)) {
+          const porOrigen = { instagram: 0, facebook: 0, web: 0, whatsapp: 0, otro: 0 };
+          for (const [label, v] of Object.entries(mapSrc)) {
+            if (label === 'total' || label === 'ok') continue;
+            const key = normalizeLeadSource(label);
+            porOrigen[key] += num(v);
+          }
+          const sum = sumPorOrigen(porOrigen);
+          if (sum > 0) {
+            const t2 = num(raw.total ?? raw.total_auditorias);
+            return {
+              total: t2 || sum,
+              porOrigen,
+              hasSeries: false,
+              rowsAnalyzed: t2 || sum
+            };
+          }
+        }
+      }
+      return null;
+    }
+
+    const dateKeyOf = (row) =>
+      row.fecha ??
+      row.periodo ??
+      row.period ??
+      row.bucket ??
+      row.time_bucket ??
+      row.timeBucket ??
+      row.day ??
+      row.week ??
+      row.week_key ??
+      row.weekKey ??
+      row.iso_week ??
+      row.isoWeek ??
+      row.semana ??
+      row.month ??
+      row.fecha_grupo ??
+      row.date;
+
     const porOrigen = { instagram: 0, facebook: 0, web: 0, whatsapp: 0, otro: 0 };
     let total = num(raw.total ?? raw.total_auditorias);
+
+    const periodMap = new Map();
+    let temporalRows = 0;
     for (const row of list) {
-      const n = num(row.auditorias ?? row.count ?? row.cantidad ?? row.total);
-      const key = normalizeLeadSource(row.fuente ?? row.validator_source ?? row.source);
+      const n = num(
+        row.auditorias ??
+          row.count ??
+          row.cantidad ??
+          row.total ??
+          row.leads ??
+          row.valor ??
+          row.n
+      );
+      const key = normalizeLeadSource(
+        row.fuente ??
+          row.validator_source ??
+          row.validatorSource ??
+          row.source ??
+          row.canal ??
+          row.origen ??
+          row.label ??
+          row.categoria
+      );
       porOrigen[key] += n;
+      let dk = dateKeyOf(row);
+      if (dk != null && String(dk).trim() !== '') {
+        if (isAggregatePeriodToken(dk)) {
+          dk = opts.hasta || opts.desde || new Date().toISOString();
+        }
+        const pk = coerceFuentesPeriodKey(dk, agrup);
+        if (pk == null || pk === '') continue;
+        temporalRows++;
+        if (!periodMap.has(pk)) {
+          periodMap.set(pk, { instagram: 0, facebook: 0, web: 0, whatsapp: 0, otro: 0 });
+        }
+        periodMap.get(pk)[key] += n;
+      }
     }
     if (!total) total = sumPorOrigen(porOrigen);
+
+    if (temporalRows > 0 && periodMap.size > 0) {
+      const periodKeys = [...periodMap.keys()].sort();
+      const periodLabels = periodKeys.map((k) => formatPeriodLabel(k, agrup));
+      const stackedBySource = { instagram: [], facebook: [], web: [], whatsapp: [], otro: [] };
+      ORIGEN_ORDER.forEach((src) => {
+        stackedBySource[src] = periodKeys.map((pk) => num(periodMap.get(pk)[src]));
+      });
+      return {
+        total,
+        porOrigen,
+        hasSeries: true,
+        periodLabels,
+        stackedBySource,
+        rowsAnalyzed: total
+      };
+    }
+
     return { total, porOrigen, hasSeries: false, rowsAnalyzed: total };
   }
 
@@ -845,7 +1227,10 @@
     let stackedBySource = { instagram: [], facebook: [], web: [], whatsapp: [], otro: [] };
 
     if (!periodKeys.length && total > 0) {
-      periodLabels = ['Todo el rango'];
+      const ref = defaultD || new Date();
+      const pk = periodKey(ref, agrup);
+      periodKeys = [pk];
+      periodLabels = [formatPeriodLabel(pk, agrup)];
       ORIGEN_ORDER.forEach((k) => {
         stackedBySource[k] = [porOrigen[k]];
       });
@@ -887,8 +1272,12 @@
 
     let apiParsed = null;
     try {
-      const raw = await API.fuentes(f.desde, f.hasta, getPaisQuery());
-      apiParsed = parseFuentesMetrics(raw);
+      const raw = await API.fuentes(f.desde, f.hasta, {
+        ...getPaisQuery(),
+        agrup: agrup,
+        group_by: agrup
+      });
+      apiParsed = parseFuentesMetrics(raw, agrup, { desde: f.desde, hasta: f.hasta });
     } catch (e) {
       console.warn('Métricas de fuentes:', e.message || e);
     }
@@ -904,9 +1293,15 @@
       model = {
         total: apiParsed.total,
         porOrigen: apiParsed.porOrigen,
-        periodLabels: built.periodLabels,
-        stackedBySource: built.stackedBySource,
-        rowsAnalyzed: built.rowsAnalyzed
+        periodLabels:
+          apiParsed.hasSeries && apiParsed.periodLabels?.length
+            ? apiParsed.periodLabels
+            : built.periodLabels,
+        stackedBySource:
+          apiParsed.hasSeries && apiParsed.stackedBySource
+            ? apiParsed.stackedBySource
+            : built.stackedBySource,
+        rowsAnalyzed: apiParsed.hasSeries ? num(apiParsed.rowsAnalyzed ?? apiParsed.total) : built.rowsAnalyzed
       };
     } else {
       model = built;
@@ -928,7 +1323,12 @@
 
     const donutLabels = ORIGEN_ORDER.map((k) => ORIGEN_LABELS[k]);
     const donutData = ORIGEN_ORDER.map((k) => num(porOrigen[k]));
-    Charts.doughnut('chartOrigenDonut', donutLabels, donutData, '');
+    Charts.doughnut(
+      'chartOrigenDonut',
+      donutLabels,
+      donutData,
+      'Sin datos de origen de leads en el período'
+    );
 
     let labels = model.periodLabels && model.periodLabels.length ? [...model.periodLabels] : [];
     let stacked = model.stackedBySource;
@@ -950,7 +1350,8 @@
       backgroundColor: ORIGEN_COLORS[k],
       borderRadius: 2
     }));
-    Charts.barVertical('chartOrigenTiempo', labels, ds, true);
+    /* Barras agrupadas (un color = una barra por periodo), no apiladas. */
+    Charts.barVertical('chartOrigenTiempo', labels, ds, false);
 
     const tbody = $('#tbodyOrigenLeads');
     if (tbody) {
@@ -974,6 +1375,72 @@
     });
   }
 
+  /**
+   * Disponibilidad para reuniones: si el API envía varios campos y alguno dice «no»,
+   * debe prevalecer sobre otro que venga en true por defecto (p. ej. activo vs disponible).
+   */
+  function advisorDisponibleParaReuniones(x) {
+    if (!x || typeof x !== 'object') return true;
+    const vals = [
+      x.activo,
+      x.activa,
+      x.disponible,
+      x.puede_recibir_reuniones,
+      x.disponible_para_reuniones,
+      x.disponibleReuniones,
+      x.enabled
+    ];
+    const isOff = (v) =>
+      v === false ||
+      v === 0 ||
+      String(v).toLowerCase() === 'false' ||
+      String(v).toLowerCase() === 'no' ||
+      String(v).toLowerCase() === '0' ||
+      String(v).toLowerCase() === 'inactivo' ||
+      String(v).toLowerCase() === 'inactive';
+    const isOn = (v) =>
+      v === true ||
+      v === 1 ||
+      String(v).toLowerCase() === 'true' ||
+      String(v).toLowerCase() === 'si' ||
+      String(v).toLowerCase() === 'sí' ||
+      String(v).toLowerCase() === '1' ||
+      String(v).toLowerCase() === 'activo' ||
+      String(v).toLowerCase() === 'active';
+    for (const v of vals) {
+      if (v === undefined || v === null || v === '') continue;
+      if (isOff(v)) return false;
+    }
+    for (const v of vals) {
+      if (v === undefined || v === null || v === '') continue;
+      if (isOn(v)) return true;
+    }
+    return true;
+  }
+
+  function pickCreatedAdvisorId(created) {
+    if (created == null) return null;
+    if (typeof created === 'number' && Number.isFinite(created)) return String(created);
+    if (typeof created === 'string') {
+      const s = created.trim();
+      return s === '' ? null : s;
+    }
+    if (typeof created !== 'object') return null;
+    const id =
+      created.id ??
+      created.asesor_id ??
+      created.advisor_id ??
+      created.advisorId ??
+      created.uuid ??
+      created.pk ??
+      created.data?.id ??
+      created.asesor?.id ??
+      created.advisor?.id ??
+      created.item?.id;
+    if (id != null && String(id).trim() !== '') return id;
+    return null;
+  }
+
   // ─── Gestión de perfiles (servidor o catálogo por fechas + localStorage) ───
   async function loadGestionAsesores() {
     const state = loadGestionState();
@@ -993,16 +1460,7 @@
             ).trim();
             if (!nombre) return null;
             const id = x.id ?? x.asesor_id ?? x.uuid ?? x.pk;
-            let activo = true;
-            const rawA = x.activo ?? x.disponible ?? x.puede_recibir_reuniones;
-            if (rawA !== undefined && rawA !== null) {
-              activo = !(
-                rawA === false ||
-                rawA === 0 ||
-                rawA === 'false' ||
-                rawA === 'no'
-              );
-            }
+            let activo = advisorDisponibleParaReuniones(x);
             const sk =
               id != null && id !== ''
                 ? `id:${String(id)}`
@@ -1015,6 +1473,8 @@
               pais: paisCode || undefined,
               activo,
               _count: num(x.count ?? x.total ?? x.registros),
+              accepted_count: num(x.accepted_count ?? x.acceptedCount),
+              declined_count: num(x.declined_count ?? x.declinedCount),
               _fromServer: true
             };
           })
@@ -1078,6 +1538,9 @@
           row._count != null
             ? `<span class="gestion-asesor-card__meta">Registros en período: <strong>${fmt(row._count)}</strong></span>`
             : '';
+        const decCounts = row._fromServer
+          ? `<span class="gestion-asesor-card__meta gestion-asesor-card__meta--counts">Decisiones acumuladas: aceptadas <strong>${fmt(row.accepted_count ?? 0)}</strong> · rechazadas <strong>${fmt(row.declined_count ?? 0)}</strong></span>`
+          : '';
         const code = row.pais ? String(row.pais).trim().toUpperCase().slice(0, 2) : '';
         const showCode = code && allowedPaisCodes().includes(code);
         const codeHtml = showCode
@@ -1092,6 +1555,7 @@
             ${codeHtml}
           </div>
           ${meta}
+          ${decCounts}
         </div>
         <div class="gestion-asesor-card__status">${badge}</div>
         <div class="gestion-asesor-card__actions">
@@ -1112,7 +1576,11 @@
 
     if (row._fromServer && row.id != null && String(row.id).indexOf('local:') !== 0) {
       try {
-        await API.advisorsPatch(row.id, { activo: !!activo });
+        await API.advisorsPatch(row.id, {
+          activo: !!activo,
+          disponible: !!activo,
+          puede_recibir_reuniones: !!activo
+        });
         const st = loadGestionState();
         delete st.activo[sk];
         saveGestionState(st);
@@ -1200,13 +1668,16 @@
       paisEl?.focus();
       return;
     }
-    const activoRadio = document.querySelector('input[name="nuevoAsesorActivo"]:checked');
-    const activo = activoRadio?.value === 'true';
+    const fd = new FormData(e.target);
+    const activoChoice = fd.get('nuevoAsesorActivo');
+    const activo = activoChoice === 'true';
     const body = {
       nombre_vendedor: nombre,
       correo_vendedor: correo,
       pais,
-      activo
+      activo: !!activo,
+      disponible: !!activo,
+      puede_recibir_reuniones: !!activo
     };
 
     const saveBtn = $('#btnNuevoAsesorGuardar');
@@ -1215,9 +1686,35 @@
       saveBtn.textContent = 'Guardando…';
     }
     try {
-      await API.advisorsCreate(body);
+      const created = await API.advisorsCreate(body);
+      const newId = pickCreatedAdvisorId(created);
+      let confirmInactivoFallo = false;
+      if (!activo && newId != null && String(newId).trim() !== '') {
+        try {
+          await API.advisorsPatch(newId, {
+            activo: false,
+            disponible: false,
+            puede_recibir_reuniones: false
+          });
+        } catch (e2) {
+          console.warn('Confirmar inactivo tras alta:', e2?.message || e2);
+          confirmInactivoFallo = true;
+        }
+      }
       API.invalidateCache();
-      showToast('Asesor creado.');
+      if (confirmInactivoFallo) {
+        showToast(
+          'Asesor creado. No se pudo fijar inactivo en el servidor; pulse «Inactivo» en la tarjeta si hace falta.',
+          true
+        );
+      } else {
+        showToast(activo ? 'Asesor creado (activo).' : 'Asesor creado (inactivo). Puede activarlo cuando esté listo.');
+      }
+      if (!activo && newId != null && String(newId).trim() !== '') {
+        const st = loadGestionState();
+        st.activo[`id:${String(newId)}`] = false;
+        saveGestionState(st);
+      }
       closeNuevoAsesorModal();
       await loadGestionAsesores();
     } catch (err) {
@@ -1249,7 +1746,11 @@
       } catch (eDel) {
         console.warn('Eliminar asesor:', eDel.message || eDel);
         try {
-          await API.advisorsPatch(row.id, { activo: false });
+          await API.advisorsPatch(row.id, {
+            activo: false,
+            disponible: false,
+            puede_recibir_reuniones: false
+          });
           showToast('Perfil desactivado.');
           closeDeleteModal();
           await loadGestionAsesores();
@@ -1273,9 +1774,14 @@
   }
 
   // ─── Load section ───
-  async function loadSectionData(section) {
-    setLoading(true);
-    setConnection('');
+  async function loadSectionData(section, opts = {}) {
+    const silent = !!opts.silent;
+    let didShowLoading = false;
+    if (!silent) {
+      setLoading(true);
+      didShowLoading = true;
+      setConnection('');
+    }
     try {
       if (section === 'gestion-asesores') {
         await loadGestionAsesores();
@@ -1302,34 +1808,42 @@
             const ag = getAgentNombre();
             const gb = getAsesoresGroupBy();
             const paisF = getPaisFilter();
+            const bundleRows = normalizeAsesoresRows(data.asesores).map(coerceAsesorMetricRow);
+
             let list = [];
             if (ag) {
               try {
                 const raw = await API.asesor(ag, f.desde, f.hasta, paisF);
-                list = normalizeAsesoresRows(raw);
+                list = normalizeAsesoresRows(raw).map(coerceAsesorMetricRow);
               } catch (_) {}
               if (!list.length) {
-                const one = findMatchingAsesorRow(normalizeAsesoresRows(data.asesores), ag);
-                if (one) list = [one];
+                const one = findMatchingAsesorRow(bundleRows, ag);
+                if (one) list = [coerceAsesorMetricRow(one)];
               } else if (list.length > 1) {
                 list = list.filter(
                   (row) =>
-                    normName(row.nombre ?? row.advisor_name ?? '') === normName(ag) ||
-                    String(row.nombre ?? row.advisor_name ?? '').trim() === ag
+                    normName(row.nombre ?? row.advisor_name ?? row.nombre_vendedor ?? '') === normName(ag) ||
+                    String(row.nombre ?? row.advisor_name ?? row.nombre_vendedor ?? '').trim() === ag
                 );
+              }
+              if (!list.length) {
+                const one = findMatchingAsesorRow(bundleRows, ag);
+                if (one) list = [coerceAsesorMetricRow(one)];
               }
             } else {
               try {
                 const raw = await API.asesores(f.desde, f.hasta, gb, undefined, paisF);
-                list = normalizeAsesoresRows(raw);
+                list = normalizeAsesoresRows(raw).map(coerceAsesorMetricRow);
               } catch (_) {}
-              if (!list.length && gb === 'asesor') list = normalizeAsesoresRows(data.asesores);
+              if (!list.length) list = bundleRows;
             }
             if (list.length) merged = { ...data, asesores: list };
           } catch (e) {
             console.warn('Métricas por asesor:', e.message || e);
           }
         }
+        merged = await augmentDecisionesIfMissing(merged);
+        dashboardData = merged;
         switch (section) {
           case 'overview': {
             let ov = merged;
@@ -1347,10 +1861,12 @@
       }
     } catch (err) {
       console.error('Error:', err);
-      setConnection('error');
+      if (!silent) setConnection('error');
     } finally {
-      setLoading(false);
-      requestAnimationFrame(() => triggerSectionAnimations(currentSection));
+      if (didShowLoading) setLoading(false);
+      if (!silent) {
+        requestAnimationFrame(() => triggerSectionAnimations(currentSection));
+      }
     }
   }
 
@@ -1359,7 +1875,7 @@
     const f = getFilters();
     const ag = getAgentNombre();
     const paisF = getPaisFilter();
-    const dashOpts = { ...DASHBOARD_QUERY, pais: paisF };
+    const dashOpts = { ...DASHBOARD_QUERY, pais: paisF, ...(ag ? { nombre: ag } : {}) };
 
     if (ag) {
       let rubrosRaw;
@@ -1446,12 +1962,32 @@
     renderPropuestas(rows, motivosList, motivosGrupos);
   }
 
+  /** Si el bloque negociación no trae conteo de seguimientos con resumen, toma el del resumen global del bundle. */
+  function enrichNegGlobalFromResumen(g, bundle) {
+    if (!g || !bundle || typeof bundle !== 'object') return;
+    const r = normalizeResumen(bundle);
+    const sr = num(r.seguimientos_registrados);
+    if (!Number.isFinite(sr) || sr <= 0) return;
+    const hasSeg = firstNum(
+      g.seguimientos_con_resumen,
+      g.seguimientos,
+      g.total_seguimientos,
+      g.con_resumen,
+      g.seguimientosConResumen,
+      g.seguimientos_registrados,
+      g.seguimientosRegistrados
+    );
+    if (hasSeg == null || num(hasSeg) === 0) {
+      g.seguimientos_registrados = sr;
+    }
+  }
+
   /** 6.6 — fusionar global+raíz; si falta algo, intentar bloque negociacion del dashboard */
   async function loadNegociacionFromApi() {
     const f = getFilters();
     const ag = getAgentNombre();
     const paisF = getPaisFilter();
-    const dashOpts = { ...DASHBOARD_QUERY, pais: paisF };
+    const dashOpts = { ...DASHBOARD_QUERY, pais: paisF, ...(ag ? { nombre: ag } : {}) };
 
     if (ag) {
       let raw = {};
@@ -1462,6 +1998,9 @@
         console.warn('Negociación (asesor):', e.message || e);
       }
       let { global: g, porRubro } = normalizeNegociacion(raw);
+      try {
+        enrichNegGlobalFromResumen(g, await ensureDashboardData());
+      } catch (_) {}
       if (!porRubro.length) {
         try {
           await ensureDashboardData();
@@ -1512,6 +2051,10 @@
         if (!porRubro.length && merged.porRubro.length) porRubro = merged.porRubro;
       } catch (_) {}
     }
+
+    try {
+      enrichNegGlobalFromResumen(g, await ensureDashboardData());
+    } catch (_) {}
 
     const rows = porRubro.map(mapNegRubroApi);
     renderNegociacion(g, rows);
@@ -1578,7 +2121,9 @@
       g.seguimientos,
       g.total_seguimientos,
       g.con_resumen,
-      g.seguimientosConResumen
+      g.seguimientosConResumen,
+      g.seguimientos_registrados,
+      g.seguimientosRegistrados
     );
     const seguimientos = segApi != null ? segApi : sumCasos > 0 ? sumCasos : null;
 
@@ -1627,12 +2172,310 @@
     return out;
   }
 
+  function hasUsableDecisiones(dec) {
+    const d = unwrapDecisionesBlock(dec);
+    if (!d || typeof d !== 'object') return false;
+    if (d.global && typeof d.global === 'object' && Object.keys(d.global).length) return true;
+    if (Array.isArray(d.por_asesor) && d.por_asesor.length) return true;
+    if (Array.isArray(d.porAsesor) && d.porAsesor.length) return true;
+    if (
+      d.aceptados != null ||
+      d.rechazados != null ||
+      d.accepted != null ||
+      d.declined != null
+    )
+      return true;
+    return false;
+  }
+
+  function extractPorAsesorDecisionesList(decisionesBlock) {
+    if (!decisionesBlock || typeof decisionesBlock !== 'object') return [];
+    if (Array.isArray(decisionesBlock)) return decisionesBlock;
+    const inner =
+      decisionesBlock.por_asesor ??
+      decisionesBlock.porAsesor ??
+      decisionesBlock.asesores ??
+      decisionesBlock.items ??
+      decisionesBlock.rows;
+    return Array.isArray(inner) ? inner : [];
+  }
+
+  function normNameDecRow(row) {
+    if (!row || typeof row !== 'object') return '';
+    const s = String(
+      pickAdvisorDisplayName(row) ||
+        row.nombre ||
+        row.advisor_name ||
+        row.nombre_vendedor ||
+        row.nombre_asesor ||
+        row.asesor_nombre ||
+        row.nombreAsesor ||
+        row.asesor ||
+        row.name ||
+        ''
+    ).trim();
+    return normName(s);
+  }
+
+  /** Fusiona métricas por asesor del bloque `decisiones` (dashboard o GET /decisiones). */
+  function mergeDecisionesPorAsesor(asesoresRows, decisionesBlock, groupByCountry) {
+    if (groupByCountry || !Array.isArray(asesoresRows) || !asesoresRows.length) return asesoresRows;
+    const list = extractPorAsesorDecisionesList(decisionesBlock);
+    if (!list.length) return asesoresRows;
+    const map = new Map();
+    for (const d of list) {
+      const k = normNameDecRow(d);
+      if (k) map.set(k, d);
+    }
+    return asesoresRows
+      .map((a) => {
+        const nk = normName(
+          String(
+            pickAdvisorDisplayName(a) || a.nombre || a.advisor_name || a.nombre_vendedor || ''
+          ).trim()
+        );
+        const d = nk ? map.get(nk) : null;
+        if (!d) return a;
+        const { acc: da, decL: dr } = pickDecisionCountsFromObject(d);
+        const ts = pickTasasFromObject(d);
+        let tAcc = ts.tAcc;
+        if (tAcc == null || Number.isNaN(tAcc)) {
+          tAcc = d.tasa_aceptacion ?? d.tasaAceptacion ?? d.pct_aceptacion;
+          if (tAcc != null && tAcc > 0 && tAcc <= 1) tAcc *= 100;
+        }
+        return {
+          ...a,
+          decisiones_aceptados: da,
+          decisiones_rechazados: dr,
+          decisiones_total: num(d.decisiones ?? d.decisiones_total ?? d.total_decisiones ?? da + dr),
+          tasa_decisiones_aceptacion: tAcc != null && Number.isFinite(num(tAcc)) ? num(tAcc) : null
+        };
+      })
+      .map((a) => {
+        const da = num(a.decisiones_aceptados);
+        const dr = num(a.decisiones_rechazados);
+        const td = num(a.decisiones_total) || da + dr;
+        let t = a.tasa_decisiones_aceptacion;
+        if ((t == null || Number.isNaN(t)) && td > 0) t = (da / td) * 100;
+        return { ...a, tasa_decisiones_aceptacion: t != null && Number.isFinite(t) ? t : null };
+      });
+  }
+
+  /** Lee conteos globales de decisiones con alias habituales de la API. */
+  function pickDecisionCountsFromObject(obj) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return { acc: 0, decL: 0 };
+    const acc = num(
+      obj.aceptados_total ??
+        obj.aceptados ??
+        obj.accepted ??
+        obj.total_aceptados ??
+        obj.total_accepted ??
+        obj.accepted_total ??
+        obj.n_aceptados ??
+        obj.count_accepted ??
+        obj.acceptances ??
+        obj.totalAceptados
+    );
+    const decL = num(
+      obj.rechazados_total ??
+        obj.rechazados ??
+        obj.declined ??
+        obj.rejected ??
+        obj.total_rechazados ??
+        obj.total_rejected ??
+        obj.total_declined ??
+        obj.n_rechazados ??
+        obj.count_declined ??
+        obj.count_rejected ??
+        obj.totalRechazados
+    );
+    if (!acc && !decL && obj.stats && typeof obj.stats === 'object' && !Array.isArray(obj.stats)) {
+      return pickDecisionCountsFromObject(obj.stats);
+    }
+    return { acc, decL };
+  }
+
+  function pickTasasFromObject(obj) {
+    if (!obj || typeof obj !== 'object') return { tAcc: undefined, tRec: undefined };
+    let tAcc =
+      obj.tasa_aceptacion_pct ??
+      obj.tasa_aceptacion ??
+      obj.tasaAceptacion ??
+      obj.pct_aceptacion ??
+      obj.tasaAceptacionPct;
+    let tRec =
+      obj.tasa_rechazo_pct ??
+      obj.tasa_rechazo ??
+      obj.tasaRechazo ??
+      obj.pct_rechazo ??
+      obj.tasaRechazoPct;
+    if (tAcc != null && tAcc > 0 && tAcc <= 1) tAcc *= 100;
+    if (tRec != null && tRec > 0 && tRec <= 1) tRec *= 100;
+    return { tAcc, tRec };
+  }
+
+  function unwrapDecisionesBlock(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    if (raw.data && typeof raw.data === 'object' && !Array.isArray(raw.data)) {
+      return { ...raw, ...raw.data };
+    }
+    return raw;
+  }
+
+  /** Conteos de estado de lead en resumen/métricas (no usa `decisiones`; evita recursión con normalizeResumen). */
+  function leadCountsFromResumenBlocks(data) {
+    if (!data || typeof data !== 'object') return { acc: 0, rej: 0 };
+    const m = mergeResumenSources(data);
+    const getN = (...keys) => {
+      for (const k of keys) {
+        const v = m[k] ?? data[k];
+        if (v !== undefined && v !== null) return num(v);
+      }
+      return 0;
+    };
+    return {
+      acc: getN('leads_aceptados', 'leadsAceptados', 'aceptados', 'leads_accepted'),
+      rej: getN('leads_rechazados', 'leadsRechazados', 'rechazados')
+    };
+  }
+
+  function normalizeDecisionesGlobal(data) {
+    const rawDec = data?.decisiones;
+    if (!rawDec || typeof rawDec !== 'object') return null;
+    const dec = unwrapDecisionesBlock(rawDec);
+
+    let acc = 0;
+    let decL = 0;
+    const g = dec.global;
+    if (g && typeof g === 'object' && Object.keys(g).length) {
+      const p = pickDecisionCountsFromObject(g);
+      acc = p.acc;
+      decL = p.decL;
+    }
+
+    if (!acc && !decL && g && g.stats && typeof g.stats === 'object') {
+      const p = pickDecisionCountsFromObject(g.stats);
+      acc = p.acc;
+      decL = p.decL;
+    }
+
+    if (!acc && !decL) {
+      const root = { ...dec };
+      delete root.global;
+      delete root.por_asesor;
+      delete root.porAsesor;
+      delete root.items;
+      delete root.rows;
+      delete root.data;
+      const p = pickDecisionCountsFromObject(root);
+      acc = p.acc;
+      decL = p.decL;
+    }
+
+    if (!acc && !decL) {
+      const list = extractPorAsesorDecisionesList(dec);
+      for (const row of list) {
+        const p = pickDecisionCountsFromObject(row);
+        acc += p.acc;
+        decL += p.decL;
+      }
+    }
+
+    const tSrc = (g && Object.keys(g).length ? g : null) || dec;
+    const { tAcc, tRec } = pickTasasFromObject(tSrc);
+    const totalExplicit = num(
+      (g && Object.keys(g).length ? g.decisiones_total : null) ??
+        dec.decisiones_total ??
+        dec.total_decisiones ??
+        dec.decisiones
+    );
+    const total = totalExplicit || acc + decL;
+
+    if (!acc && !decL && !total && !hasUsableDecisiones(dec)) {
+      const frOnly = leadCountsFromResumenBlocks(data);
+      if (!frOnly.acc && !frOnly.rej) return null;
+    }
+
+    const fromRes = leadCountsFromResumenBlocks(data);
+    const mergedAcc = Math.max(acc, fromRes.acc);
+    const mergedRej = Math.max(decL, fromRes.rej);
+    const sumM = mergedAcc + mergedRej;
+    let tAccOut = tAcc;
+    let tRecOut = tRec;
+    if (sumM > 0) {
+      tAccOut = (mergedAcc / sumM) * 100;
+      tRecOut = (mergedRej / sumM) * 100;
+    }
+
+    return {
+      aceptados: mergedAcc,
+      rechazados: mergedRej,
+      total: sumM,
+      decisiones_total: sumM,
+      tasa_aceptacion: tAccOut,
+      tasa_rechazo: tRecOut,
+      tasa_aceptacion_pct: tAccOut,
+      tasa_rechazo_pct: tRecOut
+    };
+  }
+
+  async function augmentDecisionesIfMissing(merged) {
+    if (!merged || typeof merged !== 'object') return merged;
+    if (hasUsableDecisiones(merged.decisiones)) return merged;
+    try {
+      const f = getFilters();
+      const ag = getAgentNombre();
+      const d = await API.decisiones(f.desde, f.hasta, {
+        ...getPaisQuery(),
+        ...(ag ? { nombre: ag } : {})
+      });
+      if (d && typeof d === 'object') return { ...merged, decisiones: d };
+    } catch (e) {
+      console.warn('[metrics] decisiones:', e?.message || e);
+    }
+    return merged;
+  }
+
+  function renderDecisionesGlobalChart(data) {
+    const foot = $('#decisionesGlobalFootnote');
+    const g = normalizeDecisionesGlobal(data);
+    if (!g) {
+      Charts.doughnut(
+        'chartDecisionesGlobal',
+        ['—'],
+        [0],
+        'Sin datos de decisiones de la API en este período'
+      );
+      if (foot) foot.textContent = '';
+      return;
+    }
+    const sumDec = num(g.aceptados) + num(g.rechazados);
+    Charts.doughnut(
+      'chartDecisionesGlobal',
+      ['Aceptados', 'Rechazados'],
+      [g.aceptados, g.rechazados],
+      sumDec > 0 ? '' : 'Sin decisiones con cantidad en el período (totales en 0)'
+    );
+    const parts = [];
+    parts.push(`Aceptados: ${fmt(g.aceptados)} · Rechazados: ${fmt(g.rechazados)}`);
+    if (g.total) parts.push(`Decisiones: ${fmt(g.total)}`);
+    if (g.tasa_aceptacion != null && Number.isFinite(g.tasa_aceptacion)) {
+      parts.push(`Tasa aceptación: ${pct(g.tasa_aceptacion)}`);
+    }
+    if (g.tasa_rechazo != null && Number.isFinite(g.tasa_rechazo)) {
+      parts.push(`Tasa rechazo: ${pct(g.tasa_rechazo)}`);
+    }
+    if (foot) foot.textContent = parts.join(' · ');
+  }
+
   function findMatchingAsesorRow(rows, ag) {
     if (!ag || !Array.isArray(rows)) return null;
     const n = normName(ag);
     for (const row of rows) {
       if (!row || typeof row !== 'object') continue;
-      const label = String(row.nombre ?? row.advisor_name ?? row.nombre_vendedor ?? '').trim();
+      const label = String(
+        pickAdvisorDisplayName(row) || row.nombre || row.advisor_name || row.nombre_vendedor || ''
+      ).trim();
       if (!label) continue;
       if (normName(label) === n || label === ag) return row;
     }
@@ -1762,11 +2605,22 @@
       reuniones_total = reuniones_con_retro + reuniones_sin_retro;
     }
 
+    let leads_aceptados = n(pick('leads_aceptados', 'leadsAceptados', 'aceptados', 'leads_accepted'));
+    let leads_rechazados = n(pick('leads_rechazados', 'leadsRechazados', 'rechazados'));
+    /* El bundle suele llevar aceptados/rechazados de decisiones en `decisiones`; el resumen a veces deja leads_* en 0. */
+    const decG = normalizeDecisionesGlobal(data);
+    if (decG) {
+      const da = num(decG.aceptados);
+      const dr = num(decG.rechazados);
+      if (da > leads_aceptados) leads_aceptados = da;
+      if (dr > leads_rechazados) leads_rechazados = dr;
+    }
+
     return {
       total_auditorias: n(pick('total_auditorias', 'totalAuditorias', 'auditorias')),
-      leads_aceptados: n(pick('leads_aceptados', 'leadsAceptados', 'aceptados', 'leads_accepted')),
+      leads_aceptados,
       leads_pendientes: n(pick('leads_pendientes', 'leadsPendientes', 'pendientes')),
-      leads_rechazados: n(pick('leads_rechazados', 'leadsRechazados', 'rechazados')),
+      leads_rechazados,
       reuniones_total,
       reuniones_con_retro,
       reuniones_sin_retro,
@@ -1776,13 +2630,21 @@
       ),
       ventas_cerradas: n(pick('ventas_cerradas', 'ventasCerradas', 'cerradas')),
       ventas_perdidas: n(pick('ventas_perdidas', 'ventasPerdidas', 'perdidas')),
+      /* Oportunidades con resultado "en seguimiento" (distinto de seguimientos con resumen). */
       ventas_en_seguimiento: n(
         pick(
           'ventas_en_seguimiento',
           'ventasEnSeguimiento',
+          'en_seguimiento',
+          'ventas_en_seguimiento_count'
+        )
+      ),
+      seguimientos_registrados: n(
+        pick(
           'seguimientos_registrados',
           'seguimientosRegistrados',
-          'en_seguimiento'
+          'total_seguimientos_registrados',
+          'seguimientos_con_resumen_global'
         )
       ),
       media_notiREU: pick('media_notiREU', 'mediaNotiREU', 'notiREU_promedio', 'notireu_promedio')
@@ -1806,17 +2668,19 @@
     $('#kpi-propuestas').textContent = fmt(r.propuestas_registradas);
     $('#kpi-ventasCerradas').textContent = fmt(r.ventas_cerradas);
 
-    Charts.doughnut('chartLeads', ['Aceptados', 'Rechazados', 'Pendientes'], [
-      r.leads_aceptados,
-      r.leads_rechazados,
-      r.leads_pendientes
-    ]);
+    Charts.doughnut(
+      'chartLeads',
+      ['Aceptados', 'Rechazados', 'Pendientes'],
+      [r.leads_aceptados, r.leads_rechazados, r.leads_pendientes],
+      'Sin datos de estado de leads en el período'
+    );
 
-    Charts.doughnut('chartVentas', ['Cerradas', 'Perdidas', 'En Seguimiento'], [
-      r.ventas_cerradas,
-      r.ventas_perdidas,
-      r.ventas_en_seguimiento
-    ]);
+    Charts.doughnut(
+      'chartVentas',
+      ['Cerradas', 'Perdidas', 'En Seguimiento'],
+      [r.ventas_cerradas, r.ventas_perdidas, r.ventas_en_seguimiento],
+      'Sin cierres ni seguimientos registrados en el período'
+    );
 
     const notiVal = r.media_notiREU;
     $('#gaugeNotiValue').textContent = notiVal != null ? Number(notiVal).toFixed(1) : '—';
@@ -1829,8 +2693,10 @@
       }
     ]);
 
+    renderDecisionesGlobalChart(data);
+
     requestAnimationFrame(() => {
-      ['chartLeads', 'chartVentas', 'chartRetro'].forEach((id) => {
+      ['chartLeads', 'chartVentas', 'chartRetro', 'chartDecisionesGlobal'].forEach((id) => {
         const ch = Charts.instances[id];
         if (ch?.resize) ch.resize();
       });
@@ -1844,7 +2710,15 @@
 
   function asesorRowLabel(a) {
     if (!a || typeof a !== 'object') return '—';
-    const name = String(a.nombre || a.advisor_name || '').trim();
+    const name = String(
+      a.nombre ||
+        pickAdvisorDisplayName(a) ||
+        a.advisor_name ||
+        a.name ||
+        a.label ||
+        a.grupo ||
+        ''
+    ).trim();
     const code = normalizeAdvisorPaisCode(a.pais ?? a.country);
     if (name) {
       if (code && !allowedPaisCodes().includes(name.toUpperCase())) return `${name} ${code}`;
@@ -1856,7 +2730,12 @@
   }
 
   function renderAsesores(data) {
-    asesoresData = Array.isArray(data.asesores) ? data.asesores : [];
+    let rows = Array.isArray(data.asesores)
+      ? data.asesores.map(coerceAsesorMetricRow)
+      : normalizeAsesoresRows(data.asesores).map(coerceAsesorMetricRow);
+    const gbCountry = getAsesoresGroupBy() === 'country';
+    rows = mergeDecisionesPorAsesor(rows, data.decisiones ?? dashboardData?.decisiones, gbCountry);
+    asesoresData = rows;
     const th = document.querySelector('#tablaAsesores thead th[data-sort="nombre"]');
     if (th) th.textContent = getAsesoresGroupBy() === 'country' ? 'País' : 'Asesor';
     const ht = $('#asesoresChartTitle');
@@ -1894,17 +2773,36 @@
     loadOverviewNuevasMetricas().catch((e) => console.warn(e));
   });
 
+  function fmtTasaDec(a) {
+    const t = a.tasa_decisiones_aceptacion;
+    if (t == null || Number.isNaN(t)) return '—';
+    return pct(t);
+  }
+
   function renderAsesoresTable(list) {
     const tbody = $('#tbodyAsesores');
-    if (!list.length) { tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:40px;color:var(--text-muted)">Sin datos</td></tr>'; return; }
-    tbody.innerHTML = list.map((a) => `<tr>
+    const emptyColspan = 13;
+    if (!list.length) {
+      tbody.innerHTML = `<tr><td colspan="${emptyColspan}" style="text-align:center;padding:40px;color:var(--text-muted)">Sin datos</td></tr>`;
+      return;
+    }
+    const gb = getAsesoresGroupBy() === 'country';
+    tbody.innerHTML = list
+      .map((a) => {
+        const histA = gb ? '—' : fmt(a.decisiones_aceptados);
+        const histR = gb ? '—' : fmt(a.decisiones_rechazados);
+        const tasa = gb ? '—' : fmtTasaDec(a);
+        return `<tr>
       <td><strong>${asesorRowLabel(a)}</strong></td>
       <td>${fmt(a.reuniones)}</td><td>${fmt(a.aceptaciones)}</td><td>${fmt(a.rechazos)}</td>
+      <td>${histA}</td><td>${histR}</td><td>${tasa}</td>
       <td>${fmt(a.con_retro)}</td><td>${fmt(a.promedio_min_retro, 1)}</td>
       <td>${fmt(a.notiREU_promedio ?? a.notireu_promedio, 1)}</td><td>${fmt(a.propuestas)}</td>
       <td><span class="badge badge-green">${fmt(a.ventas_cerradas)}</span></td>
       <td><span class="badge badge-red">${fmt(a.ventas_perdidas)}</span></td>
-    </tr>`).join('');
+    </tr>`;
+      })
+      .join('');
   }
 
   $('#searchAsesor')?.addEventListener('input', (e) => {
@@ -1978,10 +2876,15 @@
         'chartMotivosCat',
         ord.map((g) => g.categoria),
         ord.map((g) => g.veces),
-        ''
+        'Sin motivos agrupados en el período'
       );
     } else {
-      Charts.doughnut('chartMotivosCat', ['Sin datos por categoría'], [0], '');
+      Charts.doughnut(
+        'chartMotivosCat',
+        ['Sin datos por categoría'],
+        [0],
+        'Sin motivos agrupados en el período'
+      );
     }
 
     requestAnimationFrame(() => {
@@ -2172,6 +3075,59 @@
     return [];
   }
 
+  /** Varias columnas numéricas por fila (p. ej. notiREU 1 / 2 / 3) → barras apiladas. */
+  const NIVELES_PALETTE = [
+    '#145478',
+    '#107ab4',
+    '#c8151b',
+    '#f52938',
+    '#700306',
+    '#409abb',
+    '#989797'
+  ];
+
+  function pickNivelesEscalacionStacked(rows) {
+    if (!rows.length) return null;
+    const r0 = rows[0];
+    const keys = Object.keys(r0);
+    const labelKey =
+      keys.find((k) =>
+        /^(nombre|asesor|advisor|vendedor|pais|country|label|name|fuente)$/i.test(k)
+      ) ||
+      keys.find((k) =>
+        /nombre|asesor|pais|country|fuente|vendedor|label|grupo|clave|name|advisor/i.test(k) &&
+          !/nivel|noti|escal|count|total|veces|promedio|minutos|frecuencia/i.test(k)
+      ) ||
+      keys[0];
+    const skip = new Set([
+      labelKey,
+      'ok',
+      'success',
+      'detail',
+      'message',
+      'id',
+      'audit_id',
+      'asesor_id',
+      'advisor_id'
+    ]);
+    const metricKeys = keys.filter((k) => !skip.has(k) && isNumericLike(r0[k]));
+    const levelLike = metricKeys.filter((k) =>
+      /nivel|notireu|noti|escal|paso|reminder|recordatorio|_1$|_2$|_3$|_4$|n1\b|n2\b|n3\b|n4\b/i.test(
+        String(k)
+      )
+    );
+    const useKeys = levelLike.length >= 2 ? levelLike : metricKeys.length >= 2 ? metricKeys : [];
+    if (useKeys.length < 2) return null;
+    const labels = rows.map((r) => String(r[labelKey] ?? '—').slice(0, 48));
+    const datasets = useKeys.map((k, i) => ({
+      label: humanizeFieldKey(k),
+      data: rows.map((r) => numericCell(r[k])),
+      backgroundColor: NIVELES_PALETTE[i % NIVELES_PALETTE.length],
+      borderRadius: 2
+    }));
+    return { labels, datasets };
+  }
+
   function pickMetricBarSeries(rows) {
     if (!rows.length) return { labels: [], values: [], yLabel: 'Valor' };
     const r0 = rows[0];
@@ -2183,7 +3139,7 @@
     const numericKeys = keys.filter((k) => k !== labelKey && isNumericLike(r0[k]));
     const valueKey =
       numericKeys.find((k) =>
-        /promedio|minutos|total|count|avg|media|sum|nivel|noti|frecuencia|veces|escalaci|cantidad|cuenta|valor|value/i.test(
+        /promedio|minutos|primer|contacto|tiempo|horas|total|count|avg|media|sum|nivel|noti|frecuencia|veces|escalaci|cantidad|cuenta|valor|value/i.test(
           k
         )
       ) ||
@@ -2214,7 +3170,7 @@
     let nivelesRows = [];
     try {
       const agn = getAgentNombre();
-      const metricExtra = getPaisQuery();
+      const metricExtra = { ...getPaisQuery(), ...(agn ? { nombre: agn } : {}) };
       const [tr, ne] = await Promise.all([
         API.tiempoRespuesta(f.desde, f.hasta, groupBy, metricExtra).catch((err) => {
           console.warn('[metrics] tiempo-respuesta HTTP/error:', err?.message || err);
@@ -2252,23 +3208,28 @@
       );
     }
 
-    const t2 = pickMetricBarSeries(nivelesRows);
-    if (t2.labels.length) {
-      Charts.barVertical('chartOverviewNivelesEsc', t2.labels, [
-        {
-          label: t2.yLabel,
-          data: t2.values,
-          backgroundColor: '#c8151b',
-          borderRadius: 3
-        }
-      ], false);
+    const stackedNiv = pickNivelesEscalacionStacked(nivelesRows);
+    if (stackedNiv && stackedNiv.labels.length) {
+      Charts.barVertical('chartOverviewNivelesEsc', stackedNiv.labels, stackedNiv.datasets, true);
     } else {
-      Charts.barVertical(
-        'chartOverviewNivelesEsc',
-        ['—'],
-        [{ label: 'Sin datos', data: [0], backgroundColor: '#94a3b8', borderRadius: 3 }],
-        false
-      );
+      const t2 = pickMetricBarSeries(nivelesRows);
+      if (t2.labels.length) {
+        Charts.barVertical('chartOverviewNivelesEsc', t2.labels, [
+          {
+            label: t2.yLabel,
+            data: t2.values,
+            backgroundColor: '#c8151b',
+            borderRadius: 3
+          }
+        ], false);
+      } else {
+        Charts.barVertical(
+          'chartOverviewNivelesEsc',
+          ['—'],
+          [{ label: 'Sin datos', data: [0], backgroundColor: '#94a3b8', borderRadius: 3 }],
+          false
+        );
+      }
     }
 
     requestAnimationFrame(() => {
@@ -2488,30 +3449,42 @@
   // ═══════════════════════════════════════════════
   //  INIT
   // ═══════════════════════════════════════════════
+  function setupAutoRefresh() {
+    if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+    if (!AUTO_REFRESH_MS || AUTO_REFRESH_MS < 5000) return;
+    autoRefreshTimer = setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      API.invalidateCache();
+      dashboardData = null;
+      loadSectionData(currentSection, { silent: true }).catch((e) =>
+        console.warn('[auto-refresh]', e?.message || e)
+      );
+    }, AUTO_REFRESH_MS);
+  }
+
   async function init() {
     setLoading(true);
-    setConnection('');
-    triggerTitleUnderline();
-    updateAgentFilterVisibility();
     try {
-      try {
-        await refreshPaisFilterOptions(false);
-      } catch (_) {}
-      try {
-        await refreshAgentFilterOptions(false);
-      } catch (_) {}
+      setConnection('');
+      triggerTitleUnderline();
+      updateActiveFiltersSummary();
+      updateAgentFilterVisibility();
+      await Promise.all([
+        refreshPaisFilterOptions(false).catch(() => {}),
+        refreshAgentFilterOptions(false).catch(() => {})
+      ]);
       const data = await ensureDashboardData();
-      try {
-        await refreshPaisFilterOptions(true);
-      } catch (_) {}
-      try {
-        await refreshAgentFilterOptions(true);
-      } catch (_) {}
-      let viewOverview = data;
-      if (getAgentNombre()) viewOverview = await enrichOverviewDataForAsesor(data, getAgentNombre());
+      dashboardData = await augmentDecisionesIfMissing(data);
+      await Promise.all([
+        refreshPaisFilterOptions(true).catch(() => {}),
+        refreshAgentFilterOptions(true).catch(() => {})
+      ]);
+      let viewOverview = dashboardData;
+      if (getAgentNombre()) viewOverview = await enrichOverviewDataForAsesor(dashboardData, getAgentNombre());
       renderOverview(viewOverview);
       await loadOverviewNuevasMetricas();
-      setConnection('connected', data.dashboard_schema_version);
+      setConnection('connected', dashboardData?.dashboard_schema_version);
+      setupAutoRefresh();
     } catch (err) {
       console.error('Error al cargar el panel:', err.message || err);
       setConnection('error');

@@ -1,12 +1,12 @@
 /**
  * Capa HTTP del panel: base URL en `localStorage`, timeouts en las peticiones.
- * Las rutas siguen la documentación del servidor API LEADS.
+ * Rutas al backend API LEADS (métricas bajo `/api/metrics/*`).
  */
 const API = (() => {
   const STORAGE_KEY = 'dashboard_api_base';
   /**
-   * Base por defecto (doc. API LEADS). El servidor puede usar otro `PORT` en `.env` (p. ej. 3002).
-   * Sustituir: `localStorage.setItem('dashboard_api_base', 'http://host:puerto')` o `API.setBase(...)`.
+   * Base por defecto (sin puerto en la URL: el servidor suele exponerse en 80/443 detrás del balanceador).
+   * Si necesita puerto explícito: `localStorage.setItem('dashboard_api_base', 'http://host:3001')` o `API.setBase(...)`.
    */
   const DEFAULT_BASE = 'http://200.35.189.139';
   /** Única clave usada en todas las peticiones (`X-API-Key`). No se lee desde localStorage. */
@@ -65,7 +65,7 @@ const API = (() => {
     return str ? `?${str}` : '';
   }
 
-  /** Código de país para query `pais` (doc. API LEADS). Vacío → no se envía. */
+  /** Código de país para query `pais`. Vacío → no se envía. */
   function normPaisQuery(p) {
     if (p == null || String(p).trim() === '') return '';
     return String(p).trim().toUpperCase();
@@ -82,20 +82,25 @@ const API = (() => {
 
   const FETCH_TIMEOUT_MS = 25000;
 
-  async function fetchWithTimeout(url, init = {}, ms = FETCH_TIMEOUT_MS) {
+  function timeoutError(ms) {
+    return new Error(`Tiempo de espera agotado (${Math.round(ms / 1000)} s). Compruebe la conexión.`);
+  }
+
+  /** Fetch + lectura JSON bajo un único temporizador (incluye cuerpo lento o incompleto). */
+  async function fetchJson(url, init = {}, ms = FETCH_TIMEOUT_MS) {
     const ctrl = new AbortController();
     const id = setTimeout(() => ctrl.abort(), ms);
     try {
       const headers = authHeaders(init.headers && typeof init.headers === 'object' ? init.headers : {});
-      return await fetch(url, {
+      const res = await fetch(url, {
         ...init,
         signal: ctrl.signal,
         headers
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      return await res.json();
     } catch (e) {
-      if (e?.name === 'AbortError') {
-        throw new Error(`Tiempo de espera agotado (${Math.round(ms / 1000)} s). Compruebe la conexión.`);
-      }
+      if (e?.name === 'AbortError') throw timeoutError(ms);
       throw e;
     } finally {
       clearTimeout(id);
@@ -104,16 +109,12 @@ const API = (() => {
 
   async function get(path, params) {
     const url = `${getBase()}/api/metrics${path}${buildQuery(params)}`;
-    const res = await fetchWithTimeout(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-    return res.json();
+    return fetchJson(url);
   }
 
   async function getHealth() {
     const url = `${getBase()}/api/health${buildQuery()}`;
-    const res = await fetchWithTimeout(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-    return res.json();
+    return fetchJson(url);
   }
 
   async function apiRoot(method, path, body) {
@@ -126,23 +127,30 @@ const API = (() => {
       opts.headers['Content-Type'] = 'application/json';
       opts.body = JSON.stringify(body);
     }
-    const res = await fetchWithTimeout(url, opts);
-    if (!res.ok) {
-      const t = await res.text().catch(() => '');
-      throw new Error(`HTTP ${res.status}: ${t || res.statusText}`);
+    const ctrl = new AbortController();
+    const id = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, { ...opts, signal: ctrl.signal });
+      if (!res.ok) {
+        const t = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status}: ${t || res.statusText}`);
+      }
+      const ct = res.headers.get('content-type') || '';
+      if (ct.includes('application/json')) return await res.json();
+      return {};
+    } catch (e) {
+      if (e?.name === 'AbortError') throw timeoutError(FETCH_TIMEOUT_MS);
+      throw e;
+    } finally {
+      clearTimeout(id);
     }
-    const ct = res.headers.get('content-type') || '';
-    if (ct.includes('application/json')) return res.json();
-    return {};
   }
 
   /** Petición GET a una ruta absoluta bajo la base de la API. */
   async function getJsonPath(pathWithQuery) {
     const path = pathWithQuery.startsWith('/') ? pathWithQuery : `/${pathWithQuery}`;
     const url = `${getBase()}${path}`;
-    const res = await fetchWithTimeout(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-    return res.json();
+    return fetchJson(url);
   }
 
   return {
@@ -251,6 +259,13 @@ const API = (() => {
     },
 
     /**
+     * Decisiones aceptación/rechazo: global + por asesor (también viene en GET /metrics/dashboard → decisiones).
+     */
+    decisiones(desde, hasta, extra = {}) {
+      return get('/decisiones', { desde, hasta, ...extra });
+    },
+
+    /**
      * Lista de asesores. opts: { activo?: boolean, pais?: string }.
      * Compat: advisorsList(true|false) sigue funcionando como filtro activo.
      */
@@ -287,14 +302,17 @@ const API = (() => {
     /** Comprobación ligera de que el servidor responde. */
     health: () => getHealth(),
 
+    /** Catálogo de etapas del embudo comercial. */
+    opportunityStages() {
+      return getJsonPath('/api/opportunity-stages');
+    },
+
     /** Historial de versiones de la propuesta para un audit_id. */
     async propuestaHistory(auditId) {
       const id = auditId != null ? String(auditId).trim() : '';
       if (!id) throw new Error('audit_id requerido');
       const url = `${getBase()}/api/audit/${encodeURIComponent(id)}/propuesta/history`;
-      const res = await fetchWithTimeout(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-      return res.json();
+      return fetchJson(url);
     },
 
     async ping() {

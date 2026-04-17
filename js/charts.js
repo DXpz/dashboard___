@@ -31,19 +31,59 @@ const Charts = (() => {
     };
   }
 
-  function doughnut(canvasId, labels, data, title) {
+  function doughnutEmptyMessage(canvasId, message) {
+    return typeof message === 'string' && message.trim() ? message.trim() : 'Sin datos en el período';
+  }
+
+  /** Si la suma es 0: no instancia Chart; muestra texto en el contenedor del canvas. */
+  function setDoughnutEmptyState(canvasId, show, message) {
+    const ctx = document.getElementById(canvasId);
+    if (!ctx) return;
+    const host = ctx.closest('.chart-body') || ctx.parentElement;
+    if (!host) return;
+    const sel = `[data-chart-empty-for="${canvasId}"]`;
+    let p = host.querySelector(sel);
+    if (show) {
+      ctx.style.display = 'none';
+      if (!p) {
+        p = document.createElement('p');
+        p.setAttribute('data-chart-empty-for', canvasId);
+        p.className = 'chart-empty-state';
+        p.textContent = doughnutEmptyMessage(canvasId, message);
+        host.appendChild(p);
+      } else {
+        p.textContent = doughnutEmptyMessage(canvasId, message);
+      }
+    } else {
+      ctx.style.display = '';
+      if (p) p.remove();
+    }
+  }
+
+  /**
+   * Dona: solo se dibuja si hay cantidad total > 0.
+   * @param {string} [emptyMessage] — texto si suma = 0 (4.º argumento).
+   */
+  function doughnut(canvasId, labels, data, emptyMessage) {
     destroy(canvasId);
     const ctx = document.getElementById(canvasId);
     if (!ctx) return;
-    const nums = (data || []).map((v) => Number(v) || 0);
+    const raw = (data || []).map((v) => Number(v) || 0);
+    const sum = raw.reduce((a, b) => a + b, 0);
+    if (sum <= 0) {
+      setDoughnutEmptyState(canvasId, true, emptyMessage);
+      return null;
+    }
+    setDoughnutEmptyState(canvasId, false);
     instances[canvasId] = new Chart(ctx, {
       type: 'doughnut',
       data: {
         labels,
         datasets: [{
-          data: nums,
+          data: raw,
           backgroundColor: PALETTE.slice(0, labels.length),
-          borderWidth: 0,
+          borderWidth: 1,
+          borderColor: '#ffffff',
           hoverOffset: 8
         }]
       },
@@ -64,9 +104,9 @@ const Charts = (() => {
             callbacks: {
               label: (ctx) => {
                 const i = ctx.dataIndex;
-                const raw = nums[i];
+                const real = raw[i] ?? 0;
                 const label = ctx.label || '';
-                return `${label}: ${Number(raw).toLocaleString('es-ES')}`;
+                return `${label}: ${Number(real).toLocaleString('es-ES')}`;
               }
             }
           }
@@ -88,7 +128,10 @@ const Charts = (() => {
         responsive: true,
         maintainAspectRatio: false,
         datasets: {
-          bar: barSizingOptions(lc)
+          bar: {
+            ...barSizingOptions(lc),
+            minBarLength: 4
+          }
         },
         plugins: {
           legend: {
@@ -142,7 +185,10 @@ const Charts = (() => {
         responsive: true,
         maintainAspectRatio: false,
         datasets: {
-          bar: barSizingOptions(lc)
+          bar: {
+            ...barSizingOptions(lc),
+            minBarLength: 4
+          }
         },
         plugins: {
           legend: { display: false },
@@ -188,7 +234,10 @@ const Charts = (() => {
         responsive: true,
         maintainAspectRatio: false,
         datasets: {
-          bar: barSizingOptions(lc)
+          bar: {
+            ...barSizingOptions(lc),
+            minBarLength: 4
+          }
         },
         plugins: {
           legend: { position: 'top', labels: { usePointStyle: true, pointStyleWidth: 10, padding: 14 } },

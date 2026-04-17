@@ -7,7 +7,7 @@
   <title>Dashboard — Métricas de Asesores de Ventas</title>
   <link rel="icon" type="image/png" href="logo.png">
   <link rel="apple-touch-icon" href="logo.png">
-  <link rel="stylesheet" href="css/styles.css?v=20260413f">
+  <link rel="stylesheet" href="css/styles.css?v=20260417k">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
@@ -64,6 +64,7 @@
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
         </button>
         <h1 class="page-title" id="pageTitle">Resumen General</h1>
+        <p class="active-filters-summary hidden" id="activeFiltersSummary" aria-live="polite"></p>
       </div>
       <div class="topbar-right">
         <div class="date-filters">
@@ -165,7 +166,7 @@
             </div>
             <div class="kpi-info">
               <span class="kpi-value" id="kpi-tiempoRetro">—</span>
-              <span class="kpi-label">Prom. min a Retro</span>
+              <span class="kpi-label">Prom. min hasta retro</span>
             </div>
           </div>
           <div class="kpi-card">
@@ -209,7 +210,7 @@
         </div>
 
         <!-- Charts Row 2 -->
-        <div class="charts-row two-cols">
+        <div class="charts-row three-cols">
           <div class="chart-card">
             <div class="chart-header">
               <h3>Notificaciones Promedio (notiREU)</h3>
@@ -229,13 +230,22 @@
               <canvas id="chartRetro"></canvas>
             </div>
           </div>
+          <div class="chart-card">
+            <div class="chart-header">
+              <h3 title="Totales históricos de decisiones (API metrics/decisiones)">Decisiones (aceptar / rechazar)</h3>
+            </div>
+            <div class="chart-body">
+              <canvas id="chartDecisionesGlobal"></canvas>
+            </div>
+            <p class="chart-footnote" id="decisionesGlobalFootnote"></p>
+          </div>
         </div>
 
         <!-- Métricas API: tiempo-respuesta y niveles-escalación (doc §3.5) -->
         <div class="charts-row two-cols">
           <div class="chart-card">
             <div class="chart-header">
-              <h3>Tiempo de respuesta</h3>
+              <h3 title="Asignación → primera retroalimentación (API tiempo-respuesta)">Tiempo de primer contacto</h3>
               <div class="chart-actions">
                 <select id="selectOverviewTiempoRespGroup" class="select-small" title="Agrupación">
                   <option value="asesor">Por asesor</option>
@@ -250,7 +260,7 @@
           </div>
           <div class="chart-card">
             <div class="chart-header">
-              <h3>Niveles de escalación</h3>
+              <h3 title="Frecuencia por nivel de notificación sin retro (API niveles-escalacion)">Niveles de escalación</h3>
             </div>
             <div class="chart-body">
               <canvas id="chartOverviewNivelesEsc"></canvas>
@@ -274,6 +284,8 @@
                   <option value="reuniones">Reuniones</option>
                   <option value="aceptaciones">Aceptaciones</option>
                   <option value="rechazos">Rechazos</option>
+                  <option value="decisiones_aceptados">Hist. aceptados</option>
+                  <option value="decisiones_rechazados">Hist. rechazados</option>
                   <option value="propuestas">Propuestas</option>
                   <option value="ventas_cerradas">Ventas Cerradas</option>
                 </select>
@@ -300,6 +312,9 @@
                   <th data-sort="reuniones">Reuniones</th>
                   <th data-sort="aceptaciones">Aceptados</th>
                   <th data-sort="rechazos">Rechazos</th>
+                  <th data-sort="decisiones_aceptados" title="Histórico vía PATCH status">Hist. acep.</th>
+                  <th data-sort="decisiones_rechazados">Hist. rech.</th>
+                  <th data-sort="tasa_decisiones_aceptacion">Tasa acep. %</th>
                   <th data-sort="con_retro">Con Retro</th>
                   <th data-sort="promedio_min_retro">Prom. Min Retro</th>
                   <th data-sort="notiREU_promedio">Noti REU</th>
@@ -364,7 +379,7 @@
             </div>
             <div class="kpi-info">
               <span class="kpi-value" id="kpi-seguimientos">—</span>
-              <span class="kpi-label">Seguimientos</span>
+              <span class="kpi-label">Seguimientos con resumen</span>
             </div>
           </div>
           <div class="kpi-card">
@@ -624,8 +639,8 @@
     <div class="toast" id="appToast" role="status" aria-live="polite" hidden></div>
   </main>
 
-  <script src="js/api.js?v=20260414a"></script>
-  <script src="js/charts.js?v=20260402c"></script>
-  <script src="js/dashboard.js?v=20260413f"></script>
+  <script src="js/api.js?v=20260417n"></script>
+  <script src="js/charts.js?v=20260417g"></script>
+  <script src="js/dashboard.js?v=20260417t"></script>
 </body>
 </html>
