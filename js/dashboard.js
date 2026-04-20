@@ -2972,6 +2972,17 @@
     return id != null && id !== '' ? id : null;
   }
 
+  function opportunityNumberForHistory(r) {
+    const id =
+      r.client_id ??
+      r.clientId ??
+      r.opportunity_number ??
+      r.opportunityNumber ??
+      r.lead_id ??
+      r.leadId;
+    return id != null && String(id).trim() !== '' ? String(id).trim() : null;
+  }
+
   function renderReunionesTable(list) {
     const tbody = $('#tbodyReuniones');
     if (!list.length) {
@@ -2981,10 +2992,30 @@
     }
     tbody.innerHTML = list
       .map((r) => {
+        const opp = opportunityNumberForHistory(r);
         const aid = auditIdForHistory(r);
-        const histBtn = aid
-          ? `<button type="button" class="btn btn-sm btn-ghost btn-prop-hist" data-audit-history="${aid}" title="Ver versiones anteriores de la propuesta">Historial</button>`
-          : '—';
+        let histBtn = '—';
+        if (opp) {
+          const propAction = aid
+            ? `<button type="button" class="hist-menu-item" data-history-action="proposal" data-audit-history="${escapeHtml(String(aid))}">Historial de propuesta</button>`
+            : '';
+          histBtn = `
+            <div class="hist-menu-wrap">
+              <button type="button" class="btn btn-sm btn-ghost btn-prop-hist" data-history-menu-toggle="1" title="Ver historial">Historial</button>
+              <div class="hist-menu hidden" role="menu">
+                <button type="button" class="hist-menu-item" data-history-action="lead" data-lead-history="${escapeHtml(opp)}">Historial del lead</button>
+                ${propAction}
+              </div>
+            </div>`;
+        } else if (aid) {
+          histBtn = `
+            <div class="hist-menu-wrap">
+              <button type="button" class="btn btn-sm btn-ghost btn-prop-hist" data-history-menu-toggle="1" title="Ver historial">Historial</button>
+              <div class="hist-menu hidden" role="menu">
+                <button type="button" class="hist-menu-item" data-history-action="proposal" data-audit-history="${escapeHtml(String(aid))}">Historial de propuesta</button>
+              </div>
+            </div>`;
+        }
         return `<tr>
       <td><strong>${r.client_name || '—'}</strong></td>
       <td>${r.client_phone || '—'}</td>
@@ -3307,7 +3338,9 @@
   async function openPropuestaHistoryModal(auditId) {
     const body = $('#modalPropHistBody');
     const modal = $('#modalPropuestaHistory');
+    const title = $('#modalPropHistTitle');
     if (!body || !modal) return;
+    if (title) title.textContent = 'Historial de propuestas';
     body.innerHTML = '<p class="modal-loading">Cargando historial…</p>';
     modal.classList.remove('hidden');
     try {
@@ -3334,11 +3367,184 @@
     }
   }
 
+  function parseDateMs(v) {
+    if (v == null || v === '') return 0;
+    const ms = new Date(v).getTime();
+    return Number.isFinite(ms) ? ms : 0;
+  }
+
+  function normalizeLeadHistoryResponse(res) {
+    const data = res && typeof res === 'object' ? res : {};
+    const list =
+      (Array.isArray(data.history) && data.history) ||
+      (Array.isArray(data.items) && data.items) ||
+      (Array.isArray(data.timeline) && data.timeline) ||
+      (Array.isArray(data.data?.history) && data.data.history) ||
+      (Array.isArray(data.data?.items) && data.data.items) ||
+      (Array.isArray(res) ? res : []);
+    const snapshot =
+      (data.snapshot && typeof data.snapshot === 'object' && data.snapshot) ||
+      (data.data?.snapshot && typeof data.data.snapshot === 'object' && data.data.snapshot) ||
+      {};
+    return { history: list, snapshot };
+  }
+
+  function normalizeLeadHistoryEntry(item) {
+    const stageId = String(
+      item?.stageId ??
+        item?.stage_id ??
+        item?.opportunity_stage ??
+        item?.opportunityStage ??
+        item?.stage ??
+        ''
+    ).trim();
+    const stageLabelRaw =
+      item?.stageLabel ?? item?.stage_label ?? item?.opportunity_stage_label ?? item?.label ?? stageId;
+    const stageLabel = String(stageLabelRaw || '—').trim();
+    const createdAt = item?.createdAt ?? item?.created_at ?? item?.fecha ?? item?.date ?? null;
+    const source = String(item?.source ?? '').trim().toLowerCase();
+    const documentStatus = item?.documentStatus ?? item?.document_status ?? item?.status ?? null;
+    return { raw: item, stageId, stageLabel, createdAt, source, documentStatus };
+  }
+
+  function sourceBadge(source) {
+    if (source === 'audit') return '<span class="badge badge-blue">sistema</span>';
+    if (source === 'lead_app') return '<span class="badge badge-purple">manual/front</span>';
+    if (!source) return '<span class="badge badge-orange">sin fuente</span>';
+    return `<span class="badge badge-orange">${escapeHtml(source)}</span>`;
+  }
+
+  function dateTimeEs(v) {
+    if (!v) return '—';
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleString('es-ES');
+  }
+
+  function dedupeLeadHistoryByStage(sortedAscRows) {
+    const latestByStage = new Map();
+    sortedAscRows.forEach((row) => {
+      const key = row.stageId || `__unknown_${latestByStage.size}`;
+      latestByStage.set(key, row);
+    });
+    return Array.from(latestByStage.values()).sort((a, b) => parseDateMs(a.createdAt) - parseDateMs(b.createdAt));
+  }
+
+  function renderLeadHistoryHtml(opportunityNumber, historyRows, snapshot) {
+    if (!historyRows.length) {
+      return '<p style="color:var(--text-muted)">No hay historial para este lead.</p>';
+    }
+    const sorted = [...historyRows].sort((a, b) => parseDateMs(a.createdAt) - parseDateMs(b.createdAt));
+    const deduped = dedupeLeadHistoryByStage(sorted);
+    const doneByStage = deduped.some((x) => String(x.stageId || '').toLowerCase() === 'cierre');
+    const docStatus = snapshot?.documentStatus ?? snapshot?.document_status ?? '—';
+    const doneBadge = doneByStage
+      ? '<span class="badge badge-green">Completado</span>'
+      : '<span class="badge badge-orange">En progreso</span>';
+    const rows = deduped
+      .map(
+        (h, i) => `
+      <div class="prop-hist-item">
+        <div class="prop-hist-meta">Paso ${i + 1} · ${dateTimeEs(h.createdAt)} · ${sourceBadge(h.source)}</div>
+        <div class="prop-hist-fields">
+          <div class="prop-hist-row">
+            <span class="prop-hist-label">Etapa</span>
+            <span class="prop-hist-val">${escapeHtml(h.stageLabel || h.stageId || '—')}</span>
+          </div>
+          <div class="prop-hist-row">
+            <span class="prop-hist-label">ID etapa</span>
+            <span class="prop-hist-val">${escapeHtml(h.stageId || '—')}</span>
+          </div>
+        </div>
+      </div>`
+      )
+      .join('');
+    return `
+      <div class="prop-hist-item">
+        <div class="prop-hist-meta">Lead ${escapeHtml(opportunityNumber)}</div>
+        <div class="prop-hist-fields">
+          <div class="prop-hist-row">
+            <span class="prop-hist-label">Estado documento</span>
+            <span class="prop-hist-val">${escapeHtml(String(docStatus || '—'))}</span>
+          </div>
+          <div class="prop-hist-row">
+            <span class="prop-hist-label">Estado del lead</span>
+            <span class="prop-hist-val">${doneBadge}</span>
+          </div>
+        </div>
+      </div>
+      <div class="prop-hist-list">${rows}</div>
+    `;
+  }
+
+  function closeHistoryMenus() {
+    $$('.hist-menu').forEach((m) => m.classList.add('hidden'));
+  }
+
+  function toggleHistoryMenu(toggleBtn) {
+    const wrap = toggleBtn.closest('.hist-menu-wrap');
+    if (!wrap) return;
+    const menu = wrap.querySelector('.hist-menu');
+    if (!menu) return;
+    const willOpen = menu.classList.contains('hidden');
+    closeHistoryMenus();
+    if (willOpen) menu.classList.remove('hidden');
+  }
+
+  async function openLeadHistoryModal(opportunityNumber) {
+    const body = $('#modalPropHistBody');
+    const modal = $('#modalPropuestaHistory');
+    const title = $('#modalPropHistTitle');
+    if (!body || !modal) return;
+    if (title) title.textContent = 'Historial del lead';
+    body.innerHTML = '<p class="modal-loading">Cargando historial del lead…</p>';
+    modal.classList.remove('hidden');
+    try {
+      const res = await API.leadHistory(opportunityNumber, true);
+      const normalized = normalizeLeadHistoryResponse(res);
+      const parsedRows = normalized.history
+        .filter((x) => x && typeof x === 'object')
+        .map((x) => normalizeLeadHistoryEntry(x));
+      body.innerHTML = renderLeadHistoryHtml(opportunityNumber, parsedRows, normalized.snapshot);
+    } catch (e) {
+      console.warn('Historial lead:', e.message || e);
+      body.innerHTML =
+        '<p style="color:var(--brand-red)">No se pudo cargar el historial del lead. Compruebe la conexión e inténtelo de nuevo.</p>';
+    }
+  }
+
   $('#tbodyReuniones')?.addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-audit-history]');
-    if (!btn) return;
-    e.preventDefault();
-    openPropuestaHistoryModal(btn.getAttribute('data-audit-history'));
+    const menuToggle = e.target.closest('[data-history-menu-toggle]');
+    if (menuToggle) {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleHistoryMenu(menuToggle);
+      return;
+    }
+
+    const leadBtn = e.target.closest('[data-history-action="lead"]');
+    if (leadBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeHistoryMenus();
+      openLeadHistoryModal(leadBtn.getAttribute('data-lead-history'));
+      return;
+    }
+
+    const propBtn = e.target.closest('[data-history-action="proposal"]');
+    if (propBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeHistoryMenus();
+      openPropuestaHistoryModal(propBtn.getAttribute('data-audit-history'));
+      return;
+    }
+
+    closeHistoryMenus();
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.hist-menu-wrap')) closeHistoryMenus();
   });
 
   $('#btnClosePropHist')?.addEventListener('click', () => {

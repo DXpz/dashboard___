@@ -1424,6 +1424,49 @@ canvas {
   padding: 4px 8px !important;
 }
 
+.hist-menu-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.hist-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 120;
+  min-width: 190px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  padding: 4px;
+}
+
+.hist-menu.hidden {
+  display: none;
+}
+
+.hist-menu-item {
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+  font-size: 0.78rem;
+  color: var(--text-primary);
+  padding: 7px 9px;
+  border-radius: var(--radius-field);
+  cursor: pointer;
+}
+
+.hist-menu-item:hover {
+  background: rgba(16, 122, 180, 0.12);
+}
+
+.hist-menu-item:focus-visible {
+  outline: 2px solid var(--brand-blue);
+  outline-offset: 1px;
+}
+
 /* ===== Gestión de asesores (activar / desactivar / eliminar) ===== */
 .gestion-pais-filter {
   width: 11rem;

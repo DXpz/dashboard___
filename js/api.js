@@ -307,6 +307,17 @@ const API = (() => {
       return getJsonPath('/api/opportunity-stages');
     },
 
+    /** Historial del lead por opportunityNumber; mergeAudit mezcla auditoría + estado del front. */
+    async leadHistory(opportunityNumber, mergeAudit = true) {
+      const id = opportunityNumber != null ? String(opportunityNumber).trim() : '';
+      if (!id) throw new Error('opportunityNumber requerido');
+      const url = `${getBase()}/api/history${buildQuery({
+        opportunityNumber: id,
+        mergeAudit: mergeAudit ? 1 : 0
+      })}`;
+      return fetchJson(url);
+    },
+
     /** Historial de versiones de la propuesta para un audit_id. */
     async propuestaHistory(auditId) {
       const id = auditId != null ? String(auditId).trim() : '';
