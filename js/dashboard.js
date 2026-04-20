@@ -2996,25 +2996,14 @@
         const aid = auditIdForHistory(r);
         let histBtn = '—';
         if (opp) {
-          const propAction = aid
-            ? `<button type="button" class="hist-menu-item" data-history-action="proposal" data-audit-history="${escapeHtml(String(aid))}">Historial de propuesta</button>`
+          const propBtn2 = aid
+            ? `<button type="button" class="btn btn-sm btn-ghost btn-hist-inline" data-history-action="proposal" data-audit-history="${escapeHtml(String(aid))}" title="Historial de propuesta">Propuesta</button>`
             : '';
-          histBtn = `
-            <div class="hist-menu-wrap">
-              <button type="button" class="btn btn-sm btn-ghost btn-prop-hist" data-history-menu-toggle="1" title="Ver historial">Historial</button>
-              <div class="hist-menu hidden" role="menu">
-                <button type="button" class="hist-menu-item" data-history-action="lead" data-lead-history="${escapeHtml(opp)}">Historial del lead</button>
-                ${propAction}
-              </div>
+          histBtn = `<div class="hist-inline-wrap">
+              <button type="button" class="btn btn-sm btn-ghost btn-hist-inline" data-history-action="lead" data-lead-history="${escapeHtml(opp)}" title="Historial del lead">Lead</button>${propBtn2}
             </div>`;
         } else if (aid) {
-          histBtn = `
-            <div class="hist-menu-wrap">
-              <button type="button" class="btn btn-sm btn-ghost btn-prop-hist" data-history-menu-toggle="1" title="Ver historial">Historial</button>
-              <div class="hist-menu hidden" role="menu">
-                <button type="button" class="hist-menu-item" data-history-action="proposal" data-audit-history="${escapeHtml(String(aid))}">Historial de propuesta</button>
-              </div>
-            </div>`;
+          histBtn = `<button type="button" class="btn btn-sm btn-ghost btn-hist-inline" data-history-action="proposal" data-audit-history="${escapeHtml(String(aid))}" title="Historial de propuesta">Propuesta</button>`;
         }
         return `<tr>
       <td><strong>${r.client_name || '—'}</strong></td>
@@ -3524,19 +3513,9 @@
   }
 
   $('#tbodyReuniones')?.addEventListener('click', (e) => {
-    const menuToggle = e.target.closest('[data-history-menu-toggle]');
-    if (menuToggle) {
-      e.preventDefault();
-      e.stopPropagation();
-      toggleHistoryMenu(menuToggle);
-      return;
-    }
-
     const leadBtn = e.target.closest('[data-history-action="lead"]');
     if (leadBtn) {
       e.preventDefault();
-      e.stopPropagation();
-      closeHistoryMenus();
       openLeadHistoryModal(leadBtn.getAttribute('data-lead-history'));
       return;
     }
@@ -3544,17 +3523,8 @@
     const propBtn = e.target.closest('[data-history-action="proposal"]');
     if (propBtn) {
       e.preventDefault();
-      e.stopPropagation();
-      closeHistoryMenus();
       openPropuestaHistoryModal(propBtn.getAttribute('data-audit-history'));
-      return;
     }
-
-    closeHistoryMenus();
-  });
-
-  document.addEventListener('click', (e) => {
-    if (!e.target.closest('.hist-menu-wrap')) closeHistoryMenus();
   });
 
   $('#btnClosePropHist')?.addEventListener('click', () => {
