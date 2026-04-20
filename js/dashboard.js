@@ -3376,9 +3376,11 @@
   function normalizeLeadHistoryResponse(res) {
     const data = res && typeof res === 'object' ? res : {};
     const list =
+      (Array.isArray(data.entries) && data.entries) ||
       (Array.isArray(data.history) && data.history) ||
       (Array.isArray(data.items) && data.items) ||
       (Array.isArray(data.timeline) && data.timeline) ||
+      (Array.isArray(data.data?.entries) && data.data.entries) ||
       (Array.isArray(data.data?.history) && data.data.history) ||
       (Array.isArray(data.data?.items) && data.data.items) ||
       (Array.isArray(res) ? res : []);
@@ -3437,7 +3439,15 @@
     const sorted = [...historyRows].sort((a, b) => parseDateMs(a.createdAt) - parseDateMs(b.createdAt));
     const deduped = dedupeLeadHistoryByStage(sorted);
     const doneByStage = deduped.some((x) => String(x.stageId || '').toLowerCase() === 'cierre');
-    const docStatus = snapshot?.documentStatus ?? snapshot?.document_status ?? '—';
+    const latestSnapshot = deduped.length
+      ? deduped[deduped.length - 1]?.raw?.snapshot ?? {}
+      : {};
+    const docStatus =
+      snapshot?.documentStatus ??
+      snapshot?.document_status ??
+      latestSnapshot?.documentStatus ??
+      latestSnapshot?.document_status ??
+      '—';
     const doneBadge = doneByStage
       ? '<span class="badge badge-green">Completado</span>'
       : '<span class="badge badge-orange">En progreso</span>';

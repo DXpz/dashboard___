@@ -81,6 +81,7 @@ const API = (() => {
   }
 
   const FETCH_TIMEOUT_MS = 25000;
+  const HEALTH_TIMEOUT_MS = 90000;
 
   function timeoutError(ms) {
     return new Error(`Tiempo de espera agotado (${Math.round(ms / 1000)} s). Compruebe la conexión.`);
@@ -114,7 +115,7 @@ const API = (() => {
 
   async function getHealth() {
     const url = `${getBase()}/api/health${buildQuery()}`;
-    return fetchJson(url);
+    return fetchJson(url, {}, HEALTH_TIMEOUT_MS);
   }
 
   async function apiRoot(method, path, body) {
