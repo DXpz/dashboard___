@@ -2996,9 +2996,7 @@
         const aid = auditIdForHistory(r);
         let histBtn = '—';
         if (opp) {
-          const propBtn2 = aid
-            ? `<button type="button" class="btn btn-sm btn-ghost btn-hist-inline" data-history-action="proposal" data-audit-history="${escapeHtml(String(aid))}" title="Historial de propuesta">Propuesta</button>`
-            : '';
+          const propBtn2 = `<button type="button" class="btn btn-sm btn-ghost btn-hist-inline" data-history-action="proposal" data-client-id="${escapeHtml(opp)}" data-audit-history="${aid ? escapeHtml(String(aid)) : ''}" title="Historial de propuesta">Propuesta</button>`;
           histBtn = `<div class="hist-inline-wrap">
               <button type="button" class="btn btn-sm btn-ghost btn-hist-inline" data-history-action="lead" data-lead-history="${escapeHtml(opp)}" title="Historial del lead">Lead</button>${propBtn2}
             </div>`;
@@ -3356,6 +3354,108 @@
     }
   }
 
+  function normalizePropuestaHistoryResponse(res) {
+    const data = res && typeof res === 'object' ? res : {};
+    const history =
+      (Array.isArray(data.history) && data.history) ||
+      (Array.isArray(data.items) && data.items) ||
+      (Array.isArray(data.data?.history) && data.data.history) ||
+      [];
+    const out = [...history]
+      .filter((x) => x && typeof x === 'object')
+      .sort((a, b) => parseDateMs(a?.created_at) - parseDateMs(b?.created_at));
+    return {
+      ok: data.ok ?? true,
+      auditId: data.audit_id ?? data.auditId ?? null,
+      clientId: data.client_id ?? data.clientId ?? null,
+      history: out
+    };
+  }
+
+  function extractAuditFromByClient(res) {
+    if (!res || typeof res !== 'object') return null;
+    const audit = res.audit ?? res.data?.audit ?? res.result?.audit ?? null;
+    if (audit && typeof audit === 'object') return audit;
+    return null;
+  }
+
+  function renderPropuestaCurrentCard(propuestaJson) {
+    const content = formatPropuestaHistorialHtml(propuestaJson);
+    return `
+      <div class="prop-hist-section">
+        <div class="prop-hist-section-title">Propuesta vigente</div>
+        <div class="prop-hist-item prop-hist-item--current">
+          ${content}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderPropuestaArchivedList(historyRows) {
+    if (!historyRows.length) {
+      return '<p class="prop-hist-empty">No hay versiones archivadas para este lead.</p>';
+    }
+    return `<div class="prop-hist-list">${historyRows
+      .map(
+        (h, i) => `
+      <div class="prop-hist-item">
+        <div class="prop-hist-meta">Versión ${i + 1} · ${h.created_at ? new Date(h.created_at).toLocaleString('es-ES') : '—'}</div>
+        ${formatPropuestaHistorialHtml(h.propuesta_json ?? h.propuesta)}
+      </div>`
+      )
+      .join('')}</div>`;
+  }
+
+  async function openPropuestaHistoryByLeadModal(clientId, fallbackAuditId) {
+    const body = $('#modalPropHistBody');
+    const modal = $('#modalPropuestaHistory');
+    const title = $('#modalPropHistTitle');
+    if (!body || !modal) return;
+    if (title) title.textContent = 'Historial de propuestas';
+    body.innerHTML = '<p class="modal-loading">Cargando propuesta vigente e historial…</p>';
+    modal.classList.remove('hidden');
+    try {
+      let historyRes = null;
+      let currentAudit = null;
+      if (clientId) {
+        [historyRes, currentAudit] = await Promise.all([
+          API.propuestaHistoryByClient(clientId),
+          API.auditByClient(clientId).catch(() => null)
+        ]);
+      } else if (fallbackAuditId) {
+        historyRes = await API.propuestaHistory(fallbackAuditId);
+      } else {
+        throw new Error('Sin client_id ni audit_id para historial de propuesta');
+      }
+
+      const normalized = normalizePropuestaHistoryResponse(historyRes || {});
+      const clientLabel = clientId || normalized.clientId || '—';
+      const auditLabel = normalized.auditId || fallbackAuditId || currentAudit?.id || currentAudit?.audit_id || '—';
+      const currentPropuesta =
+        currentAudit?.propuesta_json ??
+        currentAudit?.propuesta ??
+        currentAudit?.audit?.propuesta_json ??
+        null;
+
+      body.innerHTML = `
+        <div class="prop-hist-summary-grid">
+          <div class="prop-hist-summary-card"><span class="prop-hist-summary-k">Lead</span><span class="prop-hist-summary-v">${escapeHtml(String(clientLabel))}</span></div>
+          <div class="prop-hist-summary-card"><span class="prop-hist-summary-k">Audit ID</span><span class="prop-hist-summary-v">${escapeHtml(String(auditLabel))}</span></div>
+          <div class="prop-hist-summary-card"><span class="prop-hist-summary-k">Versiones archivadas</span><span class="prop-hist-summary-v">${fmt(normalized.history.length)}</span></div>
+        </div>
+        ${currentPropuesta ? renderPropuestaCurrentCard(currentPropuesta) : '<p class="prop-hist-empty">No se encontró propuesta vigente para este lead.</p>'}
+        <div class="prop-hist-section">
+          <div class="prop-hist-section-title">Versiones archivadas</div>
+          ${renderPropuestaArchivedList(normalized.history)}
+        </div>
+      `;
+    } catch (e) {
+      console.warn('Historial propuestas:', e.message || e);
+      body.innerHTML =
+        '<p style="color:var(--brand-red)">No se pudo cargar el historial de propuestas. Compruebe la conexión e inténtelo de nuevo.</p>';
+    }
+  }
+
   function parseDateMs(v) {
     if (v == null || v === '') return 0;
     const ms = new Date(v).getTime();
@@ -3476,20 +3576,6 @@
     `;
   }
 
-  function closeHistoryMenus() {
-    $$('.hist-menu').forEach((m) => m.classList.add('hidden'));
-  }
-
-  function toggleHistoryMenu(toggleBtn) {
-    const wrap = toggleBtn.closest('.hist-menu-wrap');
-    if (!wrap) return;
-    const menu = wrap.querySelector('.hist-menu');
-    if (!menu) return;
-    const willOpen = menu.classList.contains('hidden');
-    closeHistoryMenus();
-    if (willOpen) menu.classList.remove('hidden');
-  }
-
   async function openLeadHistoryModal(opportunityNumber) {
     const body = $('#modalPropHistBody');
     const modal = $('#modalPropuestaHistory');
@@ -3523,7 +3609,10 @@
     const propBtn = e.target.closest('[data-history-action="proposal"]');
     if (propBtn) {
       e.preventDefault();
-      openPropuestaHistoryModal(propBtn.getAttribute('data-audit-history'));
+      openPropuestaHistoryByLeadModal(
+        propBtn.getAttribute('data-client-id'),
+        propBtn.getAttribute('data-audit-history')
+      );
     }
   });
 

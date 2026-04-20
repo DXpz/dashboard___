@@ -1436,6 +1436,61 @@ canvas {
   white-space: nowrap;
 }
 
+.prop-hist-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.prop-hist-summary-card {
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.prop-hist-summary-k {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.prop-hist-summary-v {
+  font-size: 0.84rem;
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.prop-hist-section {
+  margin-top: 10px;
+}
+
+.prop-hist-section-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--brand-dark);
+  margin: 0 0 8px;
+}
+
+.prop-hist-item--current {
+  border-left: 3px solid var(--brand-blue);
+  padding-left: 10px;
+}
+
+@media (max-width: 760px) {
+  .prop-hist-summary-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ===== Gestión de asesores (activar / desactivar / eliminar) ===== */
 .gestion-pais-filter {
   width: 11rem;

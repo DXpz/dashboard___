@@ -327,6 +327,22 @@ const API = (() => {
       return fetchJson(url);
     },
 
+    /** Historial de propuestas por client_id (resuelve internamente la última auditoría). */
+    async propuestaHistoryByClient(clientId) {
+      const id = clientId != null ? String(clientId).trim() : '';
+      if (!id) throw new Error('client_id requerido');
+      const url = `${getBase()}/api/audit/client/${encodeURIComponent(id)}/propuesta/history`;
+      return fetchJson(url);
+    },
+
+    /** Auditoría vigente por client_id (incluye propuesta actual). */
+    async auditByClient(clientId) {
+      const id = clientId != null ? String(clientId).trim() : '';
+      if (!id) throw new Error('client_id requerido');
+      const url = `${getBase()}/api/audit/by-client/${encodeURIComponent(id)}`;
+      return fetchJson(url);
+    },
+
     async ping() {
       try { await getHealth(); return true; }
       catch { return false; }
