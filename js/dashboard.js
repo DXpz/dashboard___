@@ -2953,18 +2953,136 @@
   // ═══════════════════════════════════════════════
   async function loadReuniones() {
     const f = getFilters();
-    const data = await API.reuniones(
-      f.desde,
-      f.hasta,
-      REUNIONES_LIMIT,
-      reunionesPage * REUNIONES_LIMIT,
-      getPaisQuery()
-    );
-    let list = Array.isArray(data) ? data : (data.reuniones || data.items || []);
     const ag = getAgentNombre();
+    const paisQ = getPaisQuery();
+    const [data, asesoresRaw, nivelesRaw] = await Promise.all([
+      API.reuniones(
+        f.desde,
+        f.hasta,
+        REUNIONES_LIMIT,
+        reunionesPage * REUNIONES_LIMIT,
+        paisQ
+      ),
+      API.asesores(f.desde, f.hasta, 'asesor', ag, getPaisFilter()).catch(() => []),
+      API.nivelesEscalacion(f.desde, f.hasta, { ...paisQ, ...(ag ? { nombre: ag } : {}) }).catch(() => [])
+    ]);
+    let list = Array.isArray(data) ? data : (data.reuniones || data.items || []);
+    const advisorMetricsMap = buildAdvisorMetricsForReuniones(asesoresRaw, nivelesRaw);
+    if (advisorMetricsMap.size) {
+      list = list.map((r) => applyAdvisorMetricsToReunionRow(r, advisorMetricsMap));
+    }
     if (ag) list = list.filter((r) => reunionRowMatchesAsesor(r, ag));
     renderReunionesTable(list);
     updatePagination(list.length);
+  }
+
+  function advisorMetricKeyFromText(v) {
+    const s = String(v ?? '').trim();
+    return s ? normName(s) : '';
+  }
+
+  function advisorLabelFromMetricRow(row) {
+    if (!row || typeof row !== 'object') return '';
+    const direct = String(
+      pickAdvisorDisplayName(row) ??
+        row.nombre ??
+        row.advisor_name ??
+        row.asesor ??
+        row.nombre_vendedor ??
+        row.name ??
+        row.label ??
+        row.grupo ??
+        row.clave ??
+        ''
+    ).trim();
+    if (direct) return direct;
+    for (const k of Object.keys(row)) {
+      if (!/nombre|asesor|advisor|vendedor|name|label|grupo|clave/i.test(k)) continue;
+      const val = row[k];
+      if (val == null) continue;
+      const s = String(val).trim();
+      if (s) return s;
+    }
+    return '';
+  }
+
+  function pickEscaladoJefeValue(row) {
+    return firstNum(
+      row?.escalado_a_jefe,
+      row?.escaladoJefe,
+      row?.escalado_a_jefatura,
+      row?.escaladoJefatura,
+      row?.escalaciones_jefe,
+      row?.escalacionesJefe
+    );
+  }
+
+  function pickNotiReuPromedioValue(row) {
+    return firstNum(
+      row?.media_notificaciones_noti_reu,
+      row?.mediaNotificacionesNotiReu,
+      row?.notiREU_promedio,
+      row?.notireu_promedio,
+      row?.media_notiREU,
+      row?.mediaNotiREU,
+      row?.notiREU
+    );
+  }
+
+  function pickMinRetroValue(row) {
+    return firstNum(
+      row?.minutos_promedio_hasta_retro,
+      row?.minutosPromedioHastaRetro,
+      row?.promedio_min_retro,
+      row?.promedio_minutos_retro,
+      row?.promedioMinutosRetro,
+      row?.avg_minutos_retro
+    );
+  }
+
+  function buildAdvisorMetricsForReuniones(asesoresRaw, nivelesRaw) {
+    const map = new Map();
+    const asesoresRows = normalizeAsesoresRows(asesoresRaw).map((r) => coerceAsesorMetricRow(r));
+    asesoresRows.forEach((row) => {
+      const label = advisorLabelFromMetricRow(row);
+      const key = advisorMetricKeyFromText(label);
+      if (!key) return;
+      map.set(key, {
+        minRetro: pickMinRetroValue(row),
+        notiPromedio: pickNotiReuPromedioValue(row),
+        escaladoJefe: null
+      });
+    });
+
+    const nivelesRows = normMetricRows(nivelesRaw);
+    nivelesRows.forEach((row) => {
+      const label = advisorLabelFromMetricRow(row);
+      const key = advisorMetricKeyFromText(label);
+      if (!key) return;
+      const current = map.get(key) || { minRetro: null, notiPromedio: null, escaladoJefe: null };
+      const esc = pickEscaladoJefeValue(row);
+      if (esc != null) current.escaladoJefe = esc;
+      map.set(key, current);
+    });
+
+    return map;
+  }
+
+  function applyAdvisorMetricsToReunionRow(row, metricsMap) {
+    if (!row || typeof row !== 'object') return row;
+    const key = advisorMetricKeyFromText(
+      row.advisor_name ?? row.nombre_asesor ?? row.asesor ?? row.nombre_vendedor ?? ''
+    );
+    if (!key) return row;
+    const m = metricsMap.get(key);
+    if (!m) return row;
+    const notiReu = m.escaladoJefe != null ? m.escaladoJefe : m.notiPromedio;
+    const minRetro = m.minRetro;
+    return {
+      ...row,
+      notiREU: notiReu != null ? notiReu : row.notiREU,
+      minutos_hasta_retro: minRetro != null ? minRetro : row.minutos_hasta_retro
+    };
   }
 
   function auditIdForHistory(r) {
