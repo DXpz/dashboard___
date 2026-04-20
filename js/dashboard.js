@@ -3543,9 +3543,13 @@
     const rows = deduped
       .map(
         (h, i) => `
-      <div class="prop-hist-item">
-        <div class="prop-hist-meta">Paso ${i + 1} · ${dateTimeEs(h.createdAt)} · ${sourceBadge(h.source)}</div>
-        <div class="prop-hist-fields">
+      <div class="prop-hist-item lead-hist-item">
+        <div class="lead-hist-item-head">
+          <span class="lead-hist-step">Paso ${i + 1}</span>
+          <span class="lead-hist-date">${dateTimeEs(h.createdAt)}</span>
+          ${sourceBadge(h.source)}
+        </div>
+        <div class="prop-hist-fields lead-hist-fields">
           <div class="prop-hist-row">
             <span class="prop-hist-label">Etapa</span>
             <span class="prop-hist-val">${escapeHtml(h.stageLabel || h.stageId || '—')}</span>
@@ -3559,20 +3563,38 @@
       )
       .join('');
     return `
-      <div class="prop-hist-item">
-        <div class="prop-hist-meta">Lead ${escapeHtml(opportunityNumber)}</div>
+      <div class="prop-hist-summary-grid lead-hist-summary-grid">
+        <div class="prop-hist-summary-card">
+          <span class="prop-hist-summary-k">Lead</span>
+          <span class="prop-hist-summary-v">${escapeHtml(opportunityNumber)}</span>
+        </div>
+        <div class="prop-hist-summary-card">
+          <span class="prop-hist-summary-k">Estado documento</span>
+          <span class="prop-hist-summary-v">${escapeHtml(String(docStatus || '—'))}</span>
+        </div>
+        <div class="prop-hist-summary-card">
+          <span class="prop-hist-summary-k">Estado del lead</span>
+          <span class="prop-hist-summary-v">${doneBadge}</span>
+        </div>
+        <div class="prop-hist-summary-card">
+          <span class="prop-hist-summary-k">Etapas registradas</span>
+          <span class="prop-hist-summary-v">${fmt(deduped.length)}</span>
+        </div>
+      </div>
+      <div class="prop-hist-section">
+        <div class="prop-hist-section-title">Timeline de etapas</div>
+        <div class="lead-hist-timeline">
+          ${rows}
+        </div>
+      </div>
+      <div class="prop-hist-item lead-hist-footnote">
         <div class="prop-hist-fields">
           <div class="prop-hist-row">
-            <span class="prop-hist-label">Estado documento</span>
-            <span class="prop-hist-val">${escapeHtml(String(docStatus || '—'))}</span>
-          </div>
-          <div class="prop-hist-row">
-            <span class="prop-hist-label">Estado del lead</span>
-            <span class="prop-hist-val">${doneBadge}</span>
+            <span class="prop-hist-label">Nota</span>
+            <span class="prop-hist-val">Se muestra la última actualización de cada etapa para evitar duplicados visuales.</span>
           </div>
         </div>
       </div>
-      <div class="prop-hist-list">${rows}</div>
     `;
   }
 

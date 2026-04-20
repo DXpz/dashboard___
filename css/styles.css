@@ -1485,9 +1485,65 @@ canvas {
   padding-left: 10px;
 }
 
+.lead-hist-summary-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.lead-hist-timeline {
+  display: grid;
+  gap: 10px;
+}
+
+.lead-hist-item {
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  margin: 0;
+  padding: 0;
+}
+
+.lead-hist-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 12px 8px;
+  border-bottom: 1px dashed var(--border-light);
+}
+
+.lead-hist-step {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--brand-dark);
+  background: rgba(20, 84, 120, 0.12);
+  border: 1px solid rgba(20, 84, 120, 0.25);
+  border-radius: 999px;
+  padding: 2px 7px;
+}
+
+.lead-hist-date {
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.lead-hist-fields {
+  border: none;
+  background: transparent;
+}
+
+.lead-hist-footnote {
+  margin-top: 10px;
+}
+
 @media (max-width: 760px) {
   .prop-hist-summary-grid {
     grid-template-columns: 1fr;
+  }
+  .lead-hist-summary-grid {
+    grid-template-columns: 1fr 1fr;
   }
 }
 
