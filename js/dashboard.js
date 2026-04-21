@@ -2625,7 +2625,7 @@
       reuniones_con_retro,
       reuniones_sin_retro,
       leads_no_agendados: n(pick('leads_no_agendados', 'leadsNoAgendados')),
-      leads_agendados: n(pick('leads_agendados', 'leadsAgendados')),
+      leads_agendados: n(pick('total_auditorias', 'totalAuditorias', 'auditorias')),
       propuestas_registradas: n(
         pick('propuestas_registradas', 'propuestasRegistradas', 'propuestas', 'total_propuestas')
       ),
