@@ -2624,7 +2624,7 @@
       reuniones_total,
       reuniones_con_retro,
       reuniones_sin_retro,
-      promedio_minutos_retro: pick('promedio_minutos_retro', 'promedioMinutosRetro', 'promedio_min_retro'),
+      leads_no_agendados: n(pick('leads_no_agendados', 'leadsNoAgendados')),
       propuestas_registradas: n(
         pick('propuestas_registradas', 'propuestasRegistradas', 'propuestas', 'total_propuestas')
       ),
@@ -2664,7 +2664,7 @@
     $('#kpi-reuniones').textContent = fmt(
       r.reuniones_total || (r.reuniones_con_retro || 0) + (r.reuniones_sin_retro || 0)
     );
-    $('#kpi-tiempoRetro').textContent = fmt(r.promedio_minutos_retro, 1);
+    $('#kpi-noAgendados').textContent = fmt(r.leads_no_agendados);
     $('#kpi-propuestas').textContent = fmt(r.propuestas_registradas);
     $('#kpi-ventasCerradas').textContent = fmt(r.ventas_cerradas);
 
