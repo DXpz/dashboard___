@@ -2625,6 +2625,7 @@
       reuniones_con_retro,
       reuniones_sin_retro,
       leads_no_agendados: n(pick('leads_no_agendados', 'leadsNoAgendados')),
+      leads_agendados: n(pick('leads_agendados', 'leadsAgendados')),
       propuestas_registradas: n(
         pick('propuestas_registradas', 'propuestasRegistradas', 'propuestas', 'total_propuestas')
       ),
@@ -2682,8 +2683,15 @@
       'Sin cierres ni seguimientos registrados en el período'
     );
 
-    const notiVal = r.media_notiREU;
-    $('#gaugeNotiValue').textContent = notiVal != null ? Number(notiVal).toFixed(1) : '—';
+    const agendados = r.leads_agendados || 0;
+    const noAgendados = r.leads_no_agendados || 0;
+
+    Charts.doughnut(
+      'chartAgendados',
+      ['Agendados', 'No Agendados'],
+      [agendados, noAgendados],
+      'Sin datos de agendamiento en el período'
+    );
 
     Charts.barVertical('chartRetro', ['Con Retro', 'Sin Retro'], [
       {
@@ -2696,7 +2704,7 @@
     renderDecisionesGlobalChart(data);
 
     requestAnimationFrame(() => {
-      ['chartLeads', 'chartVentas', 'chartRetro', 'chartDecisionesGlobal'].forEach((id) => {
+      ['chartLeads', 'chartVentas', 'chartRetro', 'chartAgendados', 'chartDecisionesGlobal'].forEach((id) => {
         const ch = Charts.instances[id];
         if (ch?.resize) ch.resize();
       });
