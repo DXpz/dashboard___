@@ -2660,30 +2660,30 @@
 
     $('#kpi-auditorias').textContent = fmt(r.total_auditorias);
     $('#kpi-aceptados').textContent = fmt(r.leads_aceptados);
-    $('#kpi-pendientes').textContent = fmt(r.leads_pendientes);
     $('#kpi-rechazados').textContent = fmt(r.leads_rechazados);
     $('#kpi-reuniones').textContent = fmt(
       r.reuniones_total || (r.reuniones_con_retro || 0) + (r.reuniones_sin_retro || 0)
     );
-    $('#kpi-noAgendados').textContent = fmt(r.leads_no_agendados);
     $('#kpi-propuestas').textContent = fmt(r.propuestas_registradas);
+    $('#kpi-negociacion').textContent = fmt(r.casos_con_negociacion_declarada || r.seguimientos_con_flag_negociacion || 0);
     $('#kpi-ventasCerradas').textContent = fmt(r.ventas_cerradas);
 
     Charts.doughnut(
       'chartLeads',
-      ['Aceptados', 'Rechazados', 'Pendientes'],
-      [r.leads_aceptados, r.leads_rechazados, r.leads_pendientes],
-      'Sin datos de estado de leads en el período'
+      ['Aceptados', 'Pendientes', 'Perdidos'],
+      [r.leads_aceptados, r.leads_pendientes, r.leads_rechazados],
+      'Sin datos de leads en el período'
     );
 
+    const totalPipeline = r.ventas_cerradas + r.ventas_perdidas + (r.en_seguimiento_sin_cierre || 0) + r.casos_con_negociacion_declarada;
     Charts.doughnut(
       'chartVentas',
-      ['Cerradas', 'Perdidas', 'En Seguimiento'],
-      [r.ventas_cerradas, r.ventas_perdidas, r.ventas_en_seguimiento],
-      'Sin cierres ni seguimientos registrados en el período'
+      ['Cerradas', 'Perdidas', 'En Negociación', 'En Seguimiento'],
+      [r.ventas_cerradas, r.ventas_perdidas, r.casos_con_negociacion_declarada || 0, r.en_seguimiento_sin_cierre || 0],
+      'SinPipeline registrado'
     );
 
-    const agendados = r.leads_agendados || 0;
+    const agendados = (r.reuniones_con_retro || 0) + (r.reuniones_sin_retro || 0);
     const noAgendados = r.leads_no_agendados || 0;
 
     Charts.doughnut(
@@ -2693,10 +2693,10 @@
       'Sin datos de agendamiento en el período'
     );
 
-    Charts.barVertical('chartRetro', ['Con Retro', 'Sin Retro'], [
+    Charts.barVertical('chartRetro', ['Con Feedback', 'Sin Feedback'], [
       {
         data: [r.reuniones_con_retro, r.reuniones_sin_retro],
-        backgroundColor: ['#145478', '#c8151b'],
+        backgroundColor: ['#22c55e', '#f97316'],
         borderRadius: 3
       }
     ]);
