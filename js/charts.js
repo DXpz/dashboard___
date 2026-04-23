@@ -60,11 +60,11 @@ const Charts = (() => {
     }
   }
 
-  /**
-   * Dona: solo se dibuja si hay cantidad total > 0.
-   * @param {string} [emptyMessage] — texto si suma = 0 (4.º argumento).
-   */
-  function doughnut(canvasId, labels, data, emptyMessage) {
+/**
+ * Dona: solo se dibuja si hay cantidad total > 0.
+ * @param {string} [emptyMessage] — texto si suma = 0 (4.º argumento).
+ */
+function doughnut(canvasId, labels, data, emptyMessage) {
     destroy(canvasId);
     const ctx = document.getElementById(canvasId);
     if (!ctx) return;
@@ -75,6 +75,9 @@ const Charts = (() => {
       return null;
     }
     setDoughnutEmptyState(canvasId, false);
+    
+    const totalLabel = Number(sum).toLocaleString('es-ES');
+    
     instances[canvasId] = new Chart(ctx, {
       type: 'doughnut',
       data: {
@@ -82,31 +85,55 @@ const Charts = (() => {
         datasets: [{
           data: raw,
           backgroundColor: PALETTE.slice(0, labels.length),
-          borderWidth: 1,
+          borderWidth: 2,
           borderColor: '#ffffff',
-          hoverOffset: 8
+          hoverOffset: 10
         }]
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        cutout: '58%',
-        layout: { padding: 6 },
+        cutout: '60%',
+        layout: { padding: 12 },
         plugins: {
-          legend: { position: 'bottom', labels: { padding: 16, usePointStyle: true, pointStyleWidth: 10 } },
+          legend: { 
+            position: 'right', 
+            labels: { 
+              padding: 16, 
+              usePointStyle: true, 
+              pointStyleWidth: 12, 
+              font: { size: 12 },
+              generateLabels: (chart) => {
+                const ds = chart.data;
+                const total = ds.datasets[0].data.reduce((a, b) => a + b, 0);
+                return ds.labels.map((label, i) => {
+                  const value = ds.datasets[0].data[i];
+                  const pct = total > 0 ? ((value / total) * 100).toFixed(0) : 0;
+                  return {
+                    text: `${label}: ${Number(value).toLocaleString('es-ES')} (${pct}%)`,
+                    fillStyle: ds.datasets[0].backgroundColor[i],
+                    strokeStyle: ds.datasets[0].backgroundColor[i],
+                    hidden: false,
+                    index: i
+                  };
+                });
+              }
+            } 
+          },
           tooltip: {
-            backgroundColor: '#145478',
-            borderColor: '#107ab4',
+            backgroundColor: '#1e293b',
+            borderColor: '#334155',
             borderWidth: 1,
-            titleFont: { weight: '600' },
-            padding: 10,
-            cornerRadius: 8,
+            titleFont: { weight: '600', size: 13 },
+            padding: 12,
+            cornerRadius: 6,
+            displayColors: true,
             callbacks: {
               label: (ctx) => {
                 const i = ctx.dataIndex;
                 const real = raw[i] ?? 0;
-                const label = ctx.label || '';
-                return `${label}: ${Number(real).toLocaleString('es-ES')}`;
+                const pct = sum > 0 ? ((real / sum) * 100).toFixed(1) : 0;
+                return `${ctx.label}: ${Number(real).toLocaleString('es-ES')} (${pct}%)`;
               }
             }
           }
