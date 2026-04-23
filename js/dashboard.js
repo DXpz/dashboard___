@@ -3118,6 +3118,11 @@
     }
     tbody.innerHTML = list
       .map((r) => {
+        // Calcular reunion_status desde advisor_feedback
+        const reunionStatus = (r.advisor_feedback && r.advisor_feedback.trim()) 
+          ? 'Completada' 
+          : (r.reunion_status || 'Pendiente');
+        
         const opp = opportunityNumberForHistory(r);
         const aid = auditIdForHistory(r);
         let histBtn = '—';
@@ -3137,7 +3142,7 @@
       <td>${r.country || '—'}</td>
       <td><span class="badge badge-blue">${r.opportunity_stage_label ?? r.opportunity_stage ?? '—'}</span></td>
       <td>${statusBadge(r.advisor_status)}</td>
-      <td>${statusBadge(r.reunion_status)}</td>
+      <td>${statusBadge(reunionStatus)}</td>
       <td>${fmt(r.notiREU)}</td>
       <td>${fmt(r.minutos_hasta_retro, 1)}</td>
       <td>${histBtn}</td>
