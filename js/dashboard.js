@@ -2512,7 +2512,7 @@
         row.rechazos ?? row.leads_rechazados ?? row.leadsRechazados ?? row.rechazados
       ),
       leads_pendientes: rec(
-        row.pendientes ?? row.leads_pendientes ?? row.leads_pendientes_decision ?? row.leadsPendientes ?? row.pendiente
+        row.pendientes ?? row.leads_pendientes ?? row.leadsPendientes ?? row.pendiente
       ),
       reuniones_total: reuniones,
       reuniones_con_retro: conRetro,
