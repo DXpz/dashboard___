@@ -2619,7 +2619,7 @@
     return {
       total_auditorias: n(pick('total_auditorias', 'totalAuditorias', 'auditorias')),
       leads_aceptados,
-      leads_pendientes: n(pick('leads_pendientes', 'leadsPendientes', 'pendientes')),
+      leads_pendientes: n(pick('leads_pendientes_decision', 'leads_pendientes', 'leadsPendientes', 'pendientes_decision', 'pendientes')),
       leads_rechazados,
       reuniones_total,
       reuniones_con_retro,
@@ -2658,15 +2658,19 @@
   function renderOverview(data) {
     const r = normalizeResumen(data);
 
-    $('#kpi-auditorias').textContent = fmt(r.total_auditorias);
-    $('#kpi-aceptados').textContent = fmt(r.leads_aceptados);
-    $('#kpi-rechazados').textContent = fmt(r.leads_rechazados);
-    $('#kpi-reuniones').textContent = fmt(
-      r.reuniones_total || (r.reuniones_con_retro || 0) + (r.reuniones_sin_retro || 0)
-    );
-    $('#kpi-propuestas').textContent = fmt(r.propuestas_registradas);
-    $('#kpi-negociacion').textContent = fmt(r.casos_con_negociacion_declarada || r.seguimientos_con_flag_negociacion || 0);
-    $('#kpi-ventasCerradas').textContent = fmt(r.ventas_cerradas);
+    const $ = (id) => document.getElementById(id);
+    const setText = (id, val) => {
+      const el = $(id);
+      if (el) el.textContent = fmt(val);
+    };
+
+    setText('kpi-auditorias', r.total_auditorias);
+    setText('kpi-aceptados', r.leads_aceptados);
+    setText('kpi-rechazados', r.leads_rechazados);
+    setText('kpi-reuniones', r.reuniones_total || (r.reuniones_con_retro || 0) + (r.reuniones_sin_retro || 0));
+    setText('kpi-propuestas', r.propuestas_registradas);
+    setText('kpi-negociacion', r.casos_con_negociacion_declarada || r.seguimientos_con_flag_negociacion || 0);
+    setText('kpi-ventasCerradas', r.ventas_cerradas);
 
     Charts.doughnut(
       'chartLeads',
