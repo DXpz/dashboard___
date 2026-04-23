@@ -2626,6 +2626,9 @@
       reuniones_sin_retro,
       leads_no_agendados: n(pick('leads_no_agendados', 'leadsNoAgendados')),
       leads_agendados: n(pick('total_auditorias', 'totalAuditorias', 'auditorias')),
+      reuniones_pendientes: n(pick('reuniones_pendientes', 'reunionesPendientes')),
+      reuniones_en_proceso: n(pick('reuniones_en_proceso', 'reunionesEnProceso')),
+      reuniones_cerrados: n(pick('reuniones_cerrados', 'reunionesCerrados')),
       propuestas_registradas: n(
         pick('propuestas_registradas', 'propuestasRegistradas', 'propuestas', 'total_propuestas')
       ),
@@ -2669,14 +2672,16 @@
     setText('kpi-rechazados', r.leads_rechazados);
     setText('kpi-reuniones', r.reuniones_total || (r.reuniones_con_retro || 0) + (r.reuniones_sin_retro || 0));
     setText('kpi-propuestas', r.propuestas_registradas);
-    setText('kpi-negociacion', r.casos_con_negociacion_declarada || r.seguimientos_con_flag_negociacion || 0);
+    setText('kpi-pendientes', r.reuniones_pendientes || 0);
+    setText('kpi-enProceso', r.reuniones_en_proceso || 0);
+    setText('kpi-cerrados', r.reuniones_cerrados || 0);
     setText('kpi-ventasCerradas', r.ventas_cerradas);
 
     Charts.doughnut(
       'chartLeads',
-      ['Aceptados', 'Pendientes', 'Perdidos'],
-      [r.leads_aceptados, r.leads_pendientes, r.leads_rechazados],
-      'Sin datos de leads en el período'
+      ['Pendientes', 'En Proceso', 'Cerrados'],
+      [r.reuniones_pendientes || 0, r.reuniones_en_proceso || 0, r.reuniones_cerrados || 0],
+      'Sin datos de reuniones en el período'
     );
 
     const totalPipeline = r.ventas_cerradas + r.ventas_perdidas + (r.en_seguimiento_sin_cierre || 0) + r.casos_con_negociacion_declarada;
