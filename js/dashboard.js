@@ -3122,10 +3122,8 @@
     }
     tbody.innerHTML = list
       .map((r) => {
-        // Calcular reunion_status desde advisor_feedback
-        const reunionStatus = (r.advisor_feedback && r.advisor_feedback.trim()) 
-          ? 'Completada' 
-          : (r.reunion_status || 'Pendiente');
+        const rawStatus = r.reunion_status || 'pending';
+        const reunionStatus = rawStatus === 'en_proceso' ? 'En Proceso' : rawStatus === 'cerrado' ? 'Cerrado' : 'Pendiente';
         
         const opp = opportunityNumberForHistory(r);
         const aid = auditIdForHistory(r);
